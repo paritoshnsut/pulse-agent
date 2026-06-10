@@ -119,6 +119,37 @@ VERTICALS = tuple(SOURCES.keys())
 REGIONS = ("india", "us", "global")
 
 
+# --------------------------------------------------------------------------- #
+# Source weights — a small multiplier on the signal composite (0.8-1.0).
+# Wire services and national outlets carry full weight; aggregators and
+# social-derived items slightly less. Cheap insurance against drafting a hot
+# take off a junk source. Unknown sources default to 1.0 (never punished for
+# being unrecognized — the same honesty rule as everywhere else).
+# --------------------------------------------------------------------------- #
+SOURCE_KIND_WEIGHTS: dict[str, float] = {
+    "reddit": 0.9,        # a thread is a lead, not a report
+    "trends": 0.9,        # a query spike, not a story
+    "wikipedia": 0.9,     # edit storm = something happened, details unverified
+}
+
+DOMAIN_WEIGHTS: dict[str, float] = {
+    "finance.yahoo.com": 0.85,   # aggregator
+    "news.yahoo.com": 0.85,
+}
+
+WEIGHT_FLOOR = 0.8
+
+
+def source_weight_for(article: dict) -> float:
+    """0.8-1.0 multiplier for an article based on where it came from."""
+    w = SOURCE_KIND_WEIGHTS.get((article.get("source") or "").lower(), 1.0)
+    url = article.get("url") or ""
+    for domain, dw in DOMAIN_WEIGHTS.items():
+        if domain in url:
+            w = min(w, dw)
+    return max(WEIGHT_FLOOR, w)
+
+
 def feeds_for(
     verticals: list[str] | None = None,
     regions: list[str] | None = None,

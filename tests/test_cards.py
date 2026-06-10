@@ -127,7 +127,7 @@ def test_format_flows_into_signal_row(temp_db):
                           "format": "data_story", "reasoning": "r"})
     DecisionAgent(client=StubClient(payload)).run(
         memory.get_account(acct_id, db_path=temp_db), db_path=temp_db)
-    sig = memory.get_signals_by_tier("FIRE", db_path=temp_db)[0]
+    sig = memory.get_signals_by_tier("WARM", db_path=temp_db)[0]
     assert sig["format"] == "data_story"
 
 

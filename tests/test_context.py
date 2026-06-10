@@ -147,5 +147,6 @@ def test_decision_run_seeds_timeline_for_fire(temp_db):
     assert events[0]["topic"] == "rbi-rate-policy"
     assert events[0]["source_url"] == "https://t/fresh"
     # and the signal row carries the topic for the updater's hint later
-    sig = memory.get_signals_by_tier("FIRE", db_path=temp_db)[0]
+    # (WARM under the 7-factor model: solo source, no memory receipts yet)
+    sig = memory.get_signals_by_tier("WARM", db_path=temp_db)[0]
     assert sig["topic"] == "rbi-rate-policy"

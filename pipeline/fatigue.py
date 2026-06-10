@@ -47,3 +47,16 @@ def topic_freshness(account_id: int, topic: Optional[str],
 def is_fatigued(account_id: int, topic: Optional[str],
                 db_path: Optional[str] = None) -> bool:
     return topic_freshness(account_id, topic, db_path=db_path)["fatigued"]
+
+
+def freshness_multiplier(account_id: int, topic: Optional[str],
+                         db_path: Optional[str] = None) -> float:
+    """Fatigue folded into SCORING (not just the draft gate): saturated topics
+    rank down before any Claude drafting money is spent.
+    0-1 recent posts -> x1.0, 2 -> x0.85, >= max -> the configured floor."""
+    n = topic_freshness(account_id, topic, db_path=db_path)["recent_posts"]
+    if n >= settings.fatigue_max_posts:
+        return settings.freshness_floor
+    if n == 2:
+        return 0.85
+    return 1.0

@@ -33,14 +33,33 @@ class Settings:
     db_path: str = os.getenv("DB_PATH", str(PROJECT_ROOT / "agent.db"))
     schema_path: str = str(PROJECT_ROOT / "db" / "schema.sql")
 
-    # --- Signal scoring weights (must sum to 1.0). From CLAUDE.md signal model. ---
+    # --- Signal scoring weights (must sum to 1.0). Evolved from CLAUDE.md's
+    # 5-factor model: corroboration (coverage breadth across our own feeds)
+    # and memory_leverage (does THIS account hold receipts on the topic) are
+    # new, both deterministic and free; the two recency-driven factors shrank
+    # to make room since corroboration now carries "is this actually big". ---
     weights: dict = field(default_factory=lambda: {
-        "velocity": 0.30,
-        "relevance": 0.25,
-        "reaction_potential": 0.20,
-        "window_urgency": 0.15,
+        "velocity": 0.20,
+        "relevance": 0.20,
+        "corroboration": 0.15,
+        "reaction_potential": 0.15,
+        "memory_leverage": 0.10,
+        "window_urgency": 0.10,
         "historical_perf": 0.10,
     })
+
+    # --- Corroboration: distinct outlets carrying the story within the window.
+    # saturation outlets -> 10/10. Stories younger than the grace period with
+    # no corroboration yet score a neutral 5 (a 20-minute-old scoop hasn't HAD
+    # time to corroborate — unknown is not punished, same rule as recency). ---
+    corroboration_window_min: int = int(os.getenv("CORROBORATION_WINDOW_MIN", "360"))
+    corroboration_saturation: int = int(os.getenv("CORROBORATION_SATURATION", "5"))
+    corroboration_grace_min: int = int(os.getenv("CORROBORATION_GRACE_MIN", "45"))
+
+    # --- Freshness multiplier on the composite (fatigue folded into scoring,
+    # so saturated topics rank down BEFORE Claude drafting money is spent):
+    # 0-1 recent posts on topic -> x1.0, 2 -> x0.85, >= fatigue_max_posts -> floor. ---
+    freshness_floor: float = float(os.getenv("FRESHNESS_FLOOR", "0.6"))
 
     # --- Urgency tier cutoffs (composite score is 0-10). From CLAUDE.md. ---
     tier_fire: float = 8.5   # >= -> FIRE

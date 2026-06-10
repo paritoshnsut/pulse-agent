@@ -5,31 +5,39 @@ Given an article and your account profile, produce a signal: a 0-10 composite
 score, an urgency tier (FIRE/WARM/COOL/SKIP), the five subscores, a suggested
 angle, and the reasoning.
 
-HONESTY ABOUT THE FIVE SUBSCORES
---------------------------------
-CLAUDE.md's signal model was designed for the Twitter/YouTube watch layer,
-where "velocity" means real engagement growth you can measure. For a *news
-article* off RSS/NewsAPI, you do not have live share velocity. So this module
-is explicit about what each subscore really is here:
+HONESTY ABOUT THE SEVEN SUBSCORES (weights in config.py)
+--------------------------------------------------------
+  velocity (20%)           -> REAL where the source provides it (reddit/trends/
+                              wiki); RECENCY PROXY for plain news.
+  relevance (20%)          -> REAL. Claude judges fit to your niche/topics.
+  corroboration (15%)      -> REAL + FREE. Distinct outlets carrying this story
+                              within the window, measured across our own
+                              ingested articles. 5 outlets in a few hours is
+                              structurally major; one blog post isn't. Items
+                              younger than the grace period with no echo yet
+                              score neutral 5 (a fresh scoop hasn't HAD time
+                              to corroborate — unknown is never punished).
+  reaction_potential (15%) -> REAL. Claude judges whether *this account* has a
+                              distinctive take.
+  memory_leverage (10%)    -> REAL + FREE. Does this account hold receipts on
+                              the topic: past stances (consistency or
+                              contradiction material), an open prediction this
+                              story might resolve (callback gold), timeline
+                              history (narrative-arc post). Pure lookups
+                              against the memory tables — the moat factor.
+  window_urgency (10%)     -> REAL (recency decay): first-mover window left.
+  historical_perf (10%)    -> REAL once you review/measure. Topic-level where
+                              evidence exists ("rbi-rate-policy"), falling back
+                              to vertical, then overall, then neutral 5.0.
 
-  velocity (30%)           -> RECENCY PROXY. A news item's "speed" is approximated
-                              by how fresh it is (time-decay). Real velocity comes
-                              online when the social watch layer is built; the
-                              field and weight stay so nothing downstream changes.
-  relevance (25%)          -> REAL. Claude judges fit to your niche/topics.
-  reaction_potential (20%) -> REAL. Claude judges whether *this account* has a
-                              distinctive take, given your stances.
-  window_urgency (15%)     -> REAL (recency). Same decay curve; how much of the
-                              first-mover window is left.
-  historical_perf (10%)    -> REAL once you review drafts. Filled from your
-                              approve/reject history (style/learning.py),
-                              per-vertical where evidence exists, shrunk toward
-                              neutral 5.0 at low sample counts. Stays exactly
-                              5.0 until reviews accumulate; real engagement
-                              data slots into the same hook later.
+Then two multipliers on the composite:
+  freshness (0.6-1.0)      -> fatigue folded into scoring: the 4th take on one
+                              topic in 72h ranks down BEFORE drafting money.
+  source weight (0.8-1.0)  -> wire/national full weight; aggregators and
+                              social-derived items slightly less (sources.py).
 
-This is the difference between a scorer that works and a demo that pretends a
-language model can feel Twitter velocity from a headline. It can't, so we don't.
+Same rule as ever: only factors with real signal. No "predicted virality"
+vibes — a language model can't feel Twitter velocity from a headline.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ import json
 import logging
 import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config import settings
@@ -64,6 +72,91 @@ def _strip_fence(text: str) -> str:
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 10.0) -> float:
     return max(lo, min(hi, x))
+
+
+def _outlet(source_name: Optional[str]) -> str:
+    """Normalize 'Times of India — Top Stories' and '... — India' to one
+    outlet, so multi-feed publishers don't corroborate themselves."""
+    return (source_name or "unknown").split("—")[0].split(" - ")[0].strip().lower()
+
+
+def _age_minutes(published_at: Optional[str], now: datetime) -> Optional[float]:
+    if not published_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return max(0.0, (now - dt).total_seconds() / 60.0)
+
+
+def corroboration_score(article: dict, now: Optional[datetime] = None,
+                        db_path: Optional[str] = None) -> float:
+    """0-10 from how many DISTINCT outlets carry this story in the window.
+    Deterministic, free: keyword match over our own ingested articles, >=2
+    shared keywords to count, saturation outlets -> 10. Failure-safe to a
+    neutral 5 (an unreadable memory must not zero a real story)."""
+    from pipeline.context import extract_keywords
+
+    now = now or datetime.now(timezone.utc)
+    keywords = extract_keywords(article.get("title"), article.get("description"))
+    if not keywords:
+        return 5.0
+    try:
+        since = (now - timedelta(minutes=settings.corroboration_window_min)).isoformat()
+        matches = memory.find_articles_fetched_after(keywords, since, limit=60,
+                                                     db_path=db_path)
+        min_hits = min(2, len(keywords))
+        outlets = set()
+        for m in matches:
+            if m.get("id") == article.get("id") or m.get("url") == article.get("url"):
+                continue
+            text = f"{m.get('title') or ''} {m.get('description') or ''}".lower()
+            if sum(1 for kw in keywords if kw in text) >= min_hits:
+                outlets.add(_outlet(m.get("source_name")))
+        outlets.discard(_outlet(article.get("source_name")))  # no self-echo
+        n_sources = len(outlets) + 1  # the article's own outlet
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("corroboration unavailable, using neutral 5: %s", exc)
+        return 5.0
+    if n_sources <= 1:
+        age = _age_minutes(article.get("published_at"), now)
+        if age is None or age <= settings.corroboration_grace_min:
+            return 5.0  # too fresh to have echoed yet — unknown, not punished
+        return 0.0      # had hours to echo and nobody else carries it
+    sat = max(2, settings.corroboration_saturation)
+    return round(_clamp(10.0 * (n_sources - 1) / (sat - 1)), 2)
+
+
+def memory_leverage_score(article: dict, account_id: int,
+                          db_path: Optional[str] = None) -> float:
+    """0-10 from this account's receipts on the story (the moat factor):
+      up to 5.0 — past public stances (2.5 each): consistency/contradiction
+      4.0       — an open prediction this story might resolve: callback gold
+      up to 1.0 — timeline history (0.5/event): narrative-arc material
+    Pure SQLite lookups; failure-safe to 0 (no receipts is a real answer)."""
+    from pipeline.context import extract_keywords
+
+    keywords = extract_keywords(article.get("title"), article.get("description"))
+    if not keywords:
+        return 0.0
+    try:
+        stances = memory.find_stances(account_id, keywords, limit=2, db_path=db_path)
+        score = 2.5 * len(stances)
+        for pred in memory.get_open_predictions(account_id, db_path=db_path):
+            pred_text = f"{pred.get('topic') or ''} {pred['prediction']}".lower()
+            hits = sum(1 for kw in keywords if kw in pred_text)
+            if hits >= min(2, len(keywords)):
+                score += 4.0
+                break
+        events = memory.find_events(keywords, limit=2, db_path=db_path)
+        score += 0.5 * len(events)
+        return round(_clamp(score), 2)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory_leverage unavailable, using 0: %s", exc)
+        return 0.0
 
 
 class DecisionAgent:
@@ -174,7 +267,8 @@ class DecisionAgent:
         return "SKIP"
 
     def score_article(self, article: dict, account: dict, now: Optional[datetime] = None,
-                      hist_perf: Optional[dict] = None) -> dict:
+                      hist_perf: Optional[dict] = None,
+                      db_path: Optional[str] = None) -> dict:
         """Full score for one article. Returns a signal dict ready for memory.
 
         If the source supplied a real velocity_hint (reddit upvotes/hr, trends
@@ -182,27 +276,47 @@ class DecisionAgent:
         of the recency proxy — the point where velocity stops being a guess.
         window_urgency stays recency-based (time left in the first-mover window).
 
-        hist_perf is the account's approve/reject performance map from
-        style.learning.historical_performance ({"overall": x, "by_vertical":
-        {...}}); the article's vertical is preferred, falling back to overall,
-        falling back to neutral 5.0 when no reviews exist yet.
+        hist_perf is the account's performance map from
+        style.learning.historical_performance; lookup sharpest-first: the
+        judged topic slug, then the article's vertical, then overall, then a
+        neutral 5.0 when no review/engagement history exists.
         """
+        now = now or datetime.now(timezone.utc)
         recency_vel, window = self.recency_scores(article.get("published_at"), now=now)
         hint = article.get("velocity_hint")
         velocity = float(hint) if hint is not None else recency_vel
+        corroboration = corroboration_score(article, now=now, db_path=db_path)
+        leverage = memory_leverage_score(article, account.get("id"), db_path=db_path) \
+            if account.get("id") else 0.0
+        judged = self.judge(article, account)
         hp = 5.0
         if hist_perf:
-            hp = hist_perf.get("by_vertical", {}).get(
-                article.get("vertical"), hist_perf.get("overall", 5.0))
-        judged = self.judge(article, account)
+            hp = hist_perf.get("by_topic", {}).get(judged["topic"])
+            if hp is None:
+                hp = hist_perf.get("by_vertical", {}).get(article.get("vertical"))
+            if hp is None:
+                hp = hist_perf.get("overall", 5.0)
         subscores = {
             "velocity": velocity,
             "relevance": judged["relevance"],
+            "corroboration": corroboration,
             "reaction_potential": judged["reaction_potential"],
+            "memory_leverage": leverage,
             "window_urgency": window,
             "historical_perf": hp,
         }
-        score = self.composite(subscores)
+        # multipliers: saturated topics rank down pre-spend; junk sources too
+        freshness = 1.0
+        if account.get("id") and judged["topic"]:
+            try:
+                from pipeline.fatigue import freshness_multiplier
+                freshness = freshness_multiplier(account["id"], judged["topic"],
+                                                 db_path=db_path)
+            except Exception:  # noqa: BLE001
+                freshness = 1.0
+        from sources import source_weight_for
+        src_weight = source_weight_for(article)
+        score = round(self.composite(subscores) * freshness * src_weight, 3)
         return {
             "article_id": article.get("id"),
             "account_id": account.get("id"),
@@ -214,6 +328,8 @@ class DecisionAgent:
             "format": judged["format"],
             "reasoning": judged["reasoning"],
             "velocity_is_real": hint is not None,
+            "freshness_mult": freshness,
+            "source_weight": src_weight,
         }
 
     def _is_stale(self, article: dict, now: datetime) -> bool:
@@ -268,7 +384,8 @@ class DecisionAgent:
                     else:
                         memory.mark_processed(art["id"], db_path=db_path)
                     continue
-                signal = self.score_article(art, account, now=now, hist_perf=hist_perf)
+                signal = self.score_article(art, account, now=now,
+                                            hist_perf=hist_perf, db_path=db_path)
                 memory.insert_signal(signal, db_path=db_path)
                 # FIRE/WARM stories enter the memory timeline — this is what
                 # the context retriever mines later. Deduped by URL, so two

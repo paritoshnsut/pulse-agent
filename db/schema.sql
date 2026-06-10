@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS signals (
     tier               TEXT NOT NULL,       -- FIRE | WARM | COOL | SKIP
     velocity           REAL,                -- subscores, each 0-10
     relevance          REAL,
+    corroboration      REAL,                -- distinct outlets carrying the story
     reaction_potential REAL,
+    memory_leverage    REAL,                -- this account's receipts on the topic
     window_urgency     REAL,
     historical_perf    REAL,
     angle              TEXT,                -- suggested take/angle for a post

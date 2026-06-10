@@ -224,6 +224,35 @@ Claude. Reddit/Trends/Wiki expose **real engagement velocity** (upvotes/hr, traf
 edit bursts) → the scorer's velocity subscore is now real for those sources
 (logged `v*`), not the recency proxy (`v~`) it still uses for plain news.
 
+## Signal scoring — 7 factors + 2 multipliers
+
+Evolved from CLAUDE.md's 5-factor model. The two additions are deterministic
+and free (zero extra Claude calls):
+
+```
+velocity        20%  real where measurable; recency proxy for plain news
+relevance       20%  Claude: fit to the niche
+corroboration   15%  distinct outlets carrying the story across our own feeds
+                     (5 outlets → 10/10; fresh scoops score neutral until
+                     they've had time to echo)
+reaction_pot.   15%  Claude: does this account have a distinctive take
+memory_leverage 10%  the moat factor: past stances (2.5 each, cap 5) + an open
+                     prediction this story may resolve (4) + timeline history
+                     (0.5/event, cap 1) — receipts make a story YOURS
+window_urgency  10%  first-mover window left (recency decay)
+historical_perf 10%  topic-level ("rbi-rate-policy") → vertical → overall,
+                     Bayesian-shrunk toward 5.0
+× freshness     0.6–1.0  fatigue folded into scoring: the 4th take on one topic
+                         in 72h ranks down BEFORE Claude drafting money is spent
+× source weight 0.8–1.0  wire/national full; aggregators/social-derived less
+```
+
+Deliberate consequence: a perfect solo-source story with no receipts tops out
+in WARM (~7.75). FIRE is reserved for stories that are structurally big
+(corroborated) or that this account is uniquely positioned to win (receipts).
+Deliberately NOT added: predicted-virality vibes, controversy scores — only
+factors with real signal.
+
 **Honest placeholders.** `historical_perf` starts at a neutral 5.0 and only moves
 as your approve/reject history accumulates (Bayesian shrinkage — one approval is
 not a 10). Stale articles (older than `STALE_AFTER_MIN`, default 3h) are skipped

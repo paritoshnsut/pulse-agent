@@ -60,6 +60,9 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     for col in ("topic", "format"):
         if col not in sig_cols:
             conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")
+    for col in ("corroboration", "memory_leverage"):
+        if col not in sig_cols:
+            conn.execute(f"ALTER TABLE signals ADD COLUMN {col} REAL")
     pred_cols = {r["name"] for r in conn.execute("PRAGMA table_info(predictions_tracker)")}
     if pred_cols and "last_checked_at" not in pred_cols:
         conn.execute("ALTER TABLE predictions_tracker ADD COLUMN last_checked_at TEXT")
@@ -278,24 +281,28 @@ def mark_scored(account_id: int, article_id: int, db_path: Optional[str] = None)
 def insert_signal(signal: dict[str, Any], db_path: Optional[str] = None) -> int:
     """Upsert a signal for (article_id, account_id); re-scoring overwrites."""
     cols = ("article_id", "account_id", "score", "tier", "velocity", "relevance",
-            "reaction_potential", "window_urgency", "historical_perf", "angle",
-            "topic", "format", "reasoning")
+            "corroboration", "reaction_potential", "memory_leverage",
+            "window_urgency", "historical_perf", "angle", "topic", "format",
+            "reasoning")
     params = {c: signal.get(c) for c in cols}
     params["created_at"] = signal.get("created_at") or _now()
     with get_conn(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO signals
                (article_id, account_id, score, tier, velocity, relevance,
-                reaction_potential, window_urgency, historical_perf, angle,
-                topic, format, reasoning, created_at)
+                corroboration, reaction_potential, memory_leverage,
+                window_urgency, historical_perf, angle, topic, format,
+                reasoning, created_at)
                VALUES (:article_id, :account_id, :score, :tier, :velocity,
-                       :relevance, :reaction_potential, :window_urgency,
-                       :historical_perf, :angle, :topic, :format, :reasoning,
-                       :created_at)
+                       :relevance, :corroboration, :reaction_potential,
+                       :memory_leverage, :window_urgency, :historical_perf,
+                       :angle, :topic, :format, :reasoning, :created_at)
                ON CONFLICT(article_id, account_id) DO UPDATE SET
                    score=excluded.score, tier=excluded.tier,
                    velocity=excluded.velocity, relevance=excluded.relevance,
+                   corroboration=excluded.corroboration,
                    reaction_potential=excluded.reaction_potential,
+                   memory_leverage=excluded.memory_leverage,
                    window_urgency=excluded.window_urgency,
                    historical_perf=excluded.historical_perf,
                    angle=excluded.angle, topic=excluded.topic,
@@ -626,12 +633,13 @@ def get_posts(
 
 def get_reviewed_posts(account_id: int, db_path: Optional[str] = None) -> list[dict]:
     """Posts a human has actioned (anything past 'draft'), joined with the
-    article's vertical. This is the raw material for the approve/reject
-    learning loop — the signal review.py captures, read back out."""
+    article's vertical and the signal's topic slug. This is the raw material
+    for the approve/reject learning loop and topic-level historical_perf."""
     with get_conn(db_path) as conn:
         rows = conn.execute(
-            """SELECT p.*, a.vertical FROM posts p
+            """SELECT p.*, a.vertical, s.topic FROM posts p
                LEFT JOIN articles a ON a.id = p.article_id
+               LEFT JOIN signals s ON s.id = p.signal_id
                WHERE p.account_id = ? AND p.status != 'draft'
                ORDER BY p.created_at""",
             (account_id,),
@@ -722,9 +730,11 @@ def get_post_engagement(account_id: int, db_path: Optional[str] = None) -> list[
     vertical — the raw material for the engagement half of historical_perf."""
     with get_conn(db_path) as conn:
         rows = conn.execute(
-            """SELECT e.*, p.format, p.posted_at, a.vertical FROM engagement e
+            """SELECT e.*, p.format, p.posted_at, a.vertical, s.topic
+               FROM engagement e
                JOIN posts p ON p.id = e.post_id
                LEFT JOIN articles a ON a.id = p.article_id
+               LEFT JOIN signals s ON s.id = p.signal_id
                WHERE p.account_id = ?
                  AND e.id IN (SELECT MAX(id) FROM engagement GROUP BY post_id)
                ORDER BY e.recorded_at""",

@@ -95,8 +95,10 @@ def correlate(reviewed: list[dict]) -> dict:
 
     by_format: dict[str, dict] = {}
     by_vertical: dict[str, dict] = {}
+    by_topic: dict[str, dict] = {}
     by_emotion: dict[str, dict] = {}
-    for bucket, key in ((by_format, "format"), (by_vertical, "vertical")):
+    for bucket, key in ((by_format, "format"), (by_vertical, "vertical"),
+                        (by_topic, "topic")):
         for p in reviewed:
             k = p.get(key) or "unknown"
             d = bucket.setdefault(k, {"approved": 0, "rejected": 0})
@@ -118,6 +120,7 @@ def correlate(reviewed: list[dict]) -> dict:
         "approval_rate": _rate(len(pos), len(neg)),
         "by_format": by_format,
         "by_vertical": by_vertical,
+        "by_topic": by_topic,
         "by_emotion": by_emotion,
         "persona_score_approved": _mean([p.get("persona_score") for p in pos]),
         "persona_score_rejected": _mean([p.get("persona_score") for p in neg]),
@@ -150,14 +153,16 @@ def engagement_scores(account_id: int, db_path: Optional[str] = None) -> dict:
     rows = memory.get_post_engagement(account_id, db_path=db_path)
     vals = [_engagement_value(r) for r in rows]
     if not vals:
-        return {"overall": [], "by_vertical": {}}
+        return {"overall": [], "by_vertical": {}, "by_topic": {}}
     baseline = statistics.median(vals) or (sum(vals) / len(vals)) or 1.0
-    out: dict = {"overall": [], "by_vertical": {}}
+    out: dict = {"overall": [], "by_vertical": {}, "by_topic": {}}
     for row, v in zip(rows, vals):
         score = round(min(10.0, 5.0 * v / baseline), 2)
         out["overall"].append(score)
         if row.get("vertical"):
             out["by_vertical"].setdefault(row["vertical"], []).append(score)
+        if row.get("topic"):
+            out["by_topic"].setdefault(row["topic"], []).append(score)
     return out
 
 
@@ -187,17 +192,23 @@ def historical_performance(account_id: int, db_path: Optional[str] = None) -> di
     reviewed = memory.get_reviewed_posts(account_id, db_path=db_path)
     stats = correlate(reviewed)
     eng = engagement_scores(account_id, db_path=db_path)
-    verticals = {v for v in stats["by_vertical"] if v != "unknown"} | set(eng["by_vertical"])
+
+    def _bucket_scores(stat_bucket: dict, eng_bucket: dict) -> dict:
+        keys = {k for k in stat_bucket if k != "unknown"} | set(eng_bucket)
+        return {
+            k: _score(
+                stat_bucket.get(k, {}).get("approved", 0),
+                stat_bucket.get(k, {}).get("rejected", 0),
+                eng_bucket.get(k, []),
+            )
+            for k in keys
+        }
+
     return {
         "overall": _score(stats["approved"], stats["rejected"], eng["overall"]),
-        "by_vertical": {
-            v: _score(
-                stats["by_vertical"].get(v, {}).get("approved", 0),
-                stats["by_vertical"].get(v, {}).get("rejected", 0),
-                eng["by_vertical"].get(v, []),
-            )
-            for v in verticals
-        },
+        "by_vertical": _bucket_scores(stats["by_vertical"], eng["by_vertical"]),
+        # topic-level is the sharp end: "rbi-rate-policy", not "politics"
+        "by_topic": _bucket_scores(stats["by_topic"], eng["by_topic"]),
     }
 
 

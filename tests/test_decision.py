@@ -33,14 +33,16 @@ def test_recency_decay_curve():
 
 def test_composite_weighting():
     a = _agent()
-    all_five = {k: 8.0 for k in
-                ("velocity", "relevance", "reaction_potential", "window_urgency", "historical_perf")}
-    assert a.composite(all_five) == 8.0  # weights sum to 1.0
+    all_seven = {k: 8.0 for k in
+                 ("velocity", "relevance", "corroboration", "reaction_potential",
+                  "memory_leverage", "window_urgency", "historical_perf")}
+    assert a.composite(all_seven) == 8.0  # weights sum to 1.0
 
-    mixed = {"velocity": 10, "relevance": 9, "reaction_potential": 9,
+    mixed = {"velocity": 10, "relevance": 9, "corroboration": 10,
+             "reaction_potential": 9, "memory_leverage": 5,
              "window_urgency": 10, "historical_perf": 5}
-    # 10*.3 + 9*.25 + 9*.2 + 10*.15 + 5*.1 = 9.05
-    assert a.composite(mixed) == pytest.approx(9.05, abs=1e-6)
+    # 10*.2 + 9*.2 + 10*.15 + 9*.15 + 5*.1 + 10*.1 + 5*.1 = 8.65
+    assert a.composite(mixed) == pytest.approx(8.65, abs=1e-6)
 
 
 def test_tier_thresholds():
@@ -68,18 +70,58 @@ def test_judge_handles_garbage_json():
     assert out["reaction_potential"] == 5.0
 
 
-def test_score_article_produces_fire_for_hot_relevant_recent():
+def test_hot_relevant_recent_without_receipts_is_warm(temp_db):
+    """The new model on purpose: a perfect solo story with no corroboration
+    and no memory receipts tops out in WARM — FIRE is reserved for stories
+    that are structurally big or that this account is positioned to win."""
+    from pipeline import memory
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
-    payload = json.dumps({"relevance": 9, "reaction_potential": 9,
-                          "angle": "the base effect nobody mentions",
-                          "reasoning": "directly in niche, contrarian angle"})
-    article = {"id": 1, "title": "GDP grows 7.2%", "description": "...",
+    acct_id = memory.upsert_account(handle="me", db_path=temp_db)
+    payload = json.dumps({"relevance": 10, "reaction_potential": 10,
+                          "angle": "a", "topic": "gdp-growth", "reasoning": "r"})
+    article = {"id": 999, "title": "GDP grows at record pace this quarter",
                "published_at": now.isoformat()}
-    account = {"id": 1, "niche": "econ policy", "topics": "[]"}
-    sig = _agent(payload).score_article(article, account, now=now)
+    sig = _agent(payload).score_article(article, {"id": acct_id}, now=now,
+                                        db_path=temp_db)
+    # vel 2.0 + rel 2.0 + corr(neutral 5)*.15=0.75 + react 1.5 + lev 0
+    # + window 1.0 + hist 0.5 = 7.75
+    assert sig["score"] == pytest.approx(7.75, abs=0.01)
+    assert sig["tier"] == "WARM"
+    assert sig["corroboration"] == 5.0      # fresh scoop: unknown, not punished
+    assert sig["memory_leverage"] == 0.0    # genuinely no receipts
+    assert sig["freshness_mult"] == 1.0 and sig["source_weight"] == 1.0
+
+
+def test_corroborated_story_with_receipts_fires(temp_db):
+    from pipeline import memory
+    now = datetime.now(timezone.utc)
+    acct_id = memory.upsert_account(handle="me", db_path=temp_db)
+    # receipts: two past stances on the topic
+    memory.log_stance(acct_id, "gdp-growth", "thinks gdp headline hides weak base",
+                      db_path=temp_db)
+    memory.log_stance(acct_id, "gdp-growth", "thinks growth quality matters most",
+                      db_path=temp_db)
+    # four other outlets carrying the same story
+    for i, outlet in enumerate(["Mint", "The Hindu", "NDTV", "Reuters"]):
+        memory.insert_article({
+            "source": "rss", "source_name": outlet, "url": f"https://t/c{i}",
+            "title": "GDP grows at record pace this quarter",
+            "published_at": now.isoformat()}, db_path=temp_db)
+    art_id, _ = memory.insert_article({
+        "source": "rss", "source_name": "Indian Express", "url": "https://t/self",
+        "title": "GDP grows at record pace this quarter",
+        "published_at": now.isoformat()}, db_path=temp_db)
+    payload = json.dumps({"relevance": 9, "reaction_potential": 9,
+                          "angle": "a", "topic": "gdp-growth", "reasoning": "r"})
+    article = memory.get_article(art_id, db_path=temp_db)
+    sig = _agent(payload).score_article(article, {"id": acct_id}, now=now,
+                                        db_path=temp_db)
+    # vel 2.0 + rel 1.8 + corr(5 outlets -> 10)*.15=1.5 + react 1.35
+    # + leverage(2 stances -> 5.0)*.1=0.5 + window 1.0 + hist 0.5 = 8.65
+    assert sig["corroboration"] == 10.0
+    assert sig["memory_leverage"] == 5.0
+    assert sig["score"] == pytest.approx(8.65, abs=0.01)
     assert sig["tier"] == "FIRE"
-    assert sig["angle"]
-    assert sig["historical_perf"] == 5.0  # placeholder until engagement data
 
 
 def test_run_scores_and_marks_processed(temp_db):
