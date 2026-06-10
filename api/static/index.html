@@ -1,0 +1,406 @@
+<!doctype html>
+<!--
+  Pulse dashboard — deliberately build-free.
+
+  React-style UI (Preact + hooks + htm via ESM CDN) with Tailwind's CDN
+  runtime. No node, no bundler, no compile step: FastAPI serves this one file
+  and it just works, forever. When this becomes a multi-tenant SaaS, replace
+  with the full Vite/React/shadcn stack from CLAUDE.md — the JSON API
+  underneath won't change.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — your content copilot</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+<div id="app"></div>
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.19.6';
+import { useState, useEffect, useCallback } from 'https://esm.sh/preact@10.19.6/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+const html = htm.bind(h);
+
+/* ---------------------------- api helpers ---------------------------- */
+const token = () => localStorage.getItem('pulse_token');
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json',
+               ...(token() ? { Authorization: `Bearer ${token()}` } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 401) { localStorage.removeItem('pulse_token'); location.reload(); }
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+
+/* ------------------------------- atoms ------------------------------- */
+const Btn = ({ onClick, color = 'zinc', children, disabled }) => html`
+  <button disabled=${disabled} onClick=${onClick}
+    class="px-3 py-1.5 rounded-lg text-sm font-medium transition
+           ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
+           ${{green:'bg-emerald-600 hover:bg-emerald-500',
+              red:'bg-rose-700 hover:bg-rose-600',
+              blue:'bg-sky-600 hover:bg-sky-500',
+              zinc:'bg-zinc-700 hover:bg-zinc-600'}[color]}">${children}</button>`;
+
+const Chip = ({ children }) => html`
+  <span class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs text-zinc-300">${children}</span>`;
+
+const Card = ({ children }) => html`
+  <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">${children}</div>`;
+
+const Input = (p) => html`
+  <input ...${p} class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5
+                        text-sm w-full placeholder-zinc-500 ${p.class || ''}" />`;
+
+function copy(text, setMsg) {
+  navigator.clipboard.writeText(text).then(() => setMsg && setMsg('copied!'));
+}
+
+/* ------------------------------- login ------------------------------- */
+function Login() {
+  const [pw, setPw] = useState(''); const [err, setErr] = useState('');
+  const go = async () => {
+    try { const r = await api('/api/login', { method: 'POST', body: { password: pw } });
+          localStorage.setItem('pulse_token', r.token); location.reload(); }
+    catch { setErr('Wrong password'); }
+  };
+  return html`<div class="min-h-screen flex items-center justify-center">
+    <div class="w-80 space-y-4 text-center">
+      <div class="text-3xl font-bold">⚡ Pulse</div>
+      <div class="text-zinc-400 text-sm">Your content copilot. Enter the family password.</div>
+      <${Input} type="password" value=${pw} placeholder="password"
+        onInput=${e => setPw(e.target.value)}
+        onKeyDown=${e => e.key === 'Enter' && go()} />
+      ${err && html`<div class="text-rose-400 text-sm">${err}</div>`}
+      <${Btn} color="blue" onClick=${go}>Enter<//>
+    </div></div>`;
+}
+
+/* ---------------------------- review feed ---------------------------- */
+function DraftCard({ p, refresh }) {
+  const [pkg, setPkg] = useState(null);
+  const [postedUrl, setPostedUrl] = useState('');
+  const [perf, setPerf] = useState({ likes: '', retweets: '', replies: '' });
+  const [phase, setPhase] = useState(p.status);   // draft -> approved -> posted -> done
+  const [msg, setMsg] = useState('');
+  const hooks = (p.meta_json || {}).alt_hooks || [];
+
+  const approve = async () => {
+    const r = await api(`/api/drafts/${p.id}/approve`, { method: 'POST' });
+    setPkg(r); setPhase('approved');
+  };
+  const rejectIt = async () => { await api(`/api/drafts/${p.id}/reject`, { method: 'POST' }); refresh(); };
+  const posted = async () => {
+    const r = await api(`/api/drafts/${p.id}/posted`, { method: 'POST', body: { url: postedUrl || null } });
+    setPhase('posted');
+    setMsg(r.memory && r.memory.ok ? `filed under '${r.memory.topic}'` : '');
+  };
+  const sendPerf = async () => {
+    await api(`/api/drafts/${p.id}/perf`, { method: 'POST',
+      body: { likes: +perf.likes || 0, retweets: +perf.retweets || 0, replies: +perf.replies || 0 } });
+    setPhase('done'); setMsg('engagement logged — the agent learns from this'); refresh();
+  };
+
+  return html`<${Card}>
+    <div class="flex items-center gap-2 mb-2 flex-wrap">
+      <${Chip}>#${p.id}<//> <${Chip}>${p.format}<//>
+      ${p.persona_score != null && html`<${Chip}>voice ${Math.round(p.persona_score)}/100<//>`}
+      ${p.needs_review ? html`<${Chip}>⚠️ check carefully<//>` : ''}
+      <${Chip}>${phase}<//>
+    </div>
+    <div class="whitespace-pre-wrap text-[15px] leading-relaxed">${p.content}</div>
+    ${hooks.length > 0 && html`<div class="mt-3 text-sm text-zinc-400">
+      <div class="font-medium text-zinc-300">alt hooks — swap in if stronger:</div>
+      ${hooks.map((hk, i) => html`<div class="flex gap-2 items-center mt-1">
+        <span class="flex-1">${i + 1}. ${hk}</span>
+        <${Btn} onClick=${() => copy(hk, setMsg)}>copy<//></div>`)}
+    </div>`}
+
+    ${phase === 'draft' && html`<div class="flex gap-2 mt-4">
+      <${Btn} color="green" onClick=${approve}>✅ Approve<//>
+      <${Btn} color="red" onClick=${rejectIt}>❌ Reject<//>
+    </div>`}
+
+    ${pkg && phase === 'approved' && html`<div class="mt-4 border-t border-zinc-800 pt-4 space-y-3">
+      ${pkg.texts.map((t, i) => html`<div class="space-y-2">
+        ${pkg.texts.length > 1 && html`<div class="text-xs text-zinc-500">tweet ${i + 1}/${pkg.texts.length}</div>`}
+        <div class="bg-zinc-800 rounded-lg p-3 whitespace-pre-wrap text-sm">${t}</div>
+        <div class="flex gap-2">
+          <a href=${pkg.intent_urls[i]} target="_blank"
+             class="px-3 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500">
+             🐦 Open in X (pre-filled)</a>
+          <${Btn} onClick=${() => copy(t, setMsg)}>copy text<//>
+        </div></div>`)}
+      ${pkg.card_url && html`<div>
+        <img src=${pkg.card_url} class="rounded-xl border border-zinc-800 max-w-md w-full" />
+        <a href=${pkg.card_url} download class="text-sky-400 text-sm">download card (attach it when composing)</a>
+      </div>`}
+      ${pkg.timing && html`<div class="text-sm text-zinc-400">⏰ ${pkg.timing}</div>`}
+      <div class="flex gap-2 items-center pt-2">
+        <${Input} placeholder="tweet URL (optional)" value=${postedUrl}
+                  onInput=${e => setPostedUrl(e.target.value)} class="max-w-xs" />
+        <${Btn} color="green" onClick=${posted}>I posted it ✓<//>
+      </div></div>`}
+
+    ${phase === 'posted' && html`<div class="mt-4 border-t border-zinc-800 pt-4">
+      <div class="text-sm text-zinc-400 mb-2">When the numbers are in (a day later is fine):</div>
+      <div class="flex gap-2 items-center flex-wrap">
+        ${['likes', 'retweets', 'replies'].map(k => html`
+          <${Input} type="number" placeholder=${k} value=${perf[k]} class="w-24"
+                    onInput=${e => setPerf({ ...perf, [k]: e.target.value })} />`)}
+        <${Btn} color="blue" onClick=${sendPerf}>log engagement<//>
+      </div></div>`}
+
+    ${msg && html`<div class="mt-2 text-emerald-400 text-sm">${msg}</div>`}
+  <//>`;
+}
+
+function Review({ accounts }) {
+  const [drafts, setDrafts] = useState([]);
+  const [outbox, setOutbox] = useState([]);
+  const refresh = useCallback(async () => {
+    setDrafts(await api('/api/drafts?status=draft'));
+    setOutbox(await api('/api/drafts?status=approved'));
+  }, []);
+  useEffect(() => { refresh(); const t = setInterval(refresh, 60000); return () => clearInterval(t); }, []);
+  return html`<div class="space-y-4">
+    ${drafts.length === 0 && outbox.length === 0 && html`<${Card}>
+      <div class="text-zinc-400">No drafts waiting. The agent is watching — new
+      drafts appear here (and on Telegram) the moment a story worth reacting to
+      breaks. ${accounts.length === 0 ? 'First: set up an account in Settings.' : ''}</div><//>`}
+    ${drafts.map(p => html`<${DraftCard} key=${p.id} p=${p} refresh=${refresh} />`)}
+    ${outbox.length > 0 && html`<div class="text-zinc-400 text-sm font-medium pt-2">
+      📤 Approved, waiting for you to post (${outbox.length})</div>`}
+    ${outbox.map(p => html`<${DraftCard} key=${p.id} p=${p} refresh=${refresh} />`)}
+  </div>`;
+}
+
+/* ------------------------------- ideas ------------------------------- */
+function Ideas({ accounts }) {
+  const [acct, setAcct] = useState(null);
+  const [ideas, setIdeas] = useState([]);
+  const [brief, setBrief] = useState('');
+  const [topic, setTopic] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const id = acct ?? (accounts[0] || {}).id;
+  useEffect(() => { if (!id) return;
+    api(`/api/ideas/${id}`).then(setIdeas);
+    api(`/api/briefing/${id}`).then(r => setBrief(r.text));
+  }, [id]);
+  const evergreen = async () => {
+    setBusy(true); setMsg('');
+    try { const p = await api('/api/evergreen', { method: 'POST', body: { account_id: id, topic: topic || null } });
+          setMsg(`🌲 drafted #${p.id} — it's in the Review tab`); }
+    catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+  return html`<div class="space-y-4">
+    <${AccountPicker} accounts=${accounts} value=${id} onChange=${setAcct} />
+    <${Card}>
+      <div class="font-medium mb-2">🌲 Evergreen — no news needed</div>
+      <div class="text-sm text-zinc-400 mb-2">Drafts your strongest recurring argument from memory. Topic optional.</div>
+      <div class="flex gap-2"><${Input} placeholder="topic (optional)" value=${topic}
+        onInput=${e => setTopic(e.target.value)} class="max-w-xs" />
+        <${Btn} color="green" disabled=${busy} onClick=${evergreen}>${busy ? 'drafting…' : 'Draft it'}<//></div>
+      ${msg && html`<div class="mt-2 text-sm text-emerald-400">${msg}</div>`}
+    <//>
+    <${Card}><div class="font-medium mb-2">💡 Ideas bank (yesterday's mid-tier signals)</div>
+      ${ideas.length === 0 && html`<div class="text-sm text-zinc-400">Empty — quiet day.</div>`}
+      ${ideas.map(s => html`<div class="py-2 border-b border-zinc-800 last:border-0">
+        <div class="text-sm">[${s.score.toFixed(1)}] ${s.title}</div>
+        ${s.angle && html`<div class="text-xs text-zinc-500">angle: ${s.angle}</div>`}</div>`)}
+    <//>
+    <${Card}><div class="font-medium mb-2">☀️ Briefing</div>
+      <pre class="text-sm text-zinc-300 whitespace-pre-wrap font-sans">${brief}</pre><//>
+  </div>`;
+}
+
+/* ----------------------------- analytics ----------------------------- */
+function Rates({ title, rates }) {
+  const entries = Object.entries(rates || {});
+  if (!entries.length) return '';
+  return html`<${Card}><div class="font-medium mb-2">${title}</div>
+    ${entries.map(([k, v]) => html`<div class="flex justify-between text-sm py-0.5">
+      <span class="text-zinc-400">${k}</span>
+      <span>${v && v.rate != null ? Math.round(v.rate * 100) + '%' : (typeof v === 'number' ? Math.round(v * 100) + '%' : '—')}
+        ${v && v.approved != null ? html` <span class="text-zinc-500">(${v.approved}✓ ${v.rejected}✗)</span>` : ''}</span>
+    </div>`)}<//>`;
+}
+
+function Analytics({ accounts }) {
+  const [acct, setAcct] = useState(null);
+  const [a, setA] = useState(null);
+  const id = acct ?? (accounts[0] || {}).id;
+  useEffect(() => { if (id) api(`/api/analytics/${id}`).then(setA); }, [id]);
+  if (!a) return html`<${AccountPicker} accounts=${accounts} value=${id} onChange=${setAcct} />`;
+  const s = a.stats;
+  return html`<div class="space-y-4">
+    <${AccountPicker} accounts=${accounts} value=${id} onChange=${setAcct} />
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      ${[['reviewed', s.total_reviewed], ['approval', s.approval_rate != null ? Math.round(s.approval_rate * 100) + '%' : '—'],
+         ['news sense (0-10)', a.historical_perf.overall], ['open predictions', a.open_predictions]]
+        .map(([k, v]) => html`<${Card}><div class="text-2xl font-bold">${v}</div>
+          <div class="text-xs text-zinc-400">${k}</div><//>`)}
+    </div>
+    <${Card}><div class="font-medium mb-1">⏰ Best posting windows (${a.timing.label})</div>
+      <div class="text-sm">${a.timing.windows.map(w => `${String(w[0]).padStart(2,'0')}:00–${String(w[1]).padStart(2,'0')}:00`).join(', ')}</div>
+      <div class="text-xs text-zinc-500 mt-1">${a.timing.learned ? `learned from ${a.timing.samples} posts` : 'defaults — log engagement on 8+ posts to personalize'}</div><//>
+    <div class="grid md:grid-cols-2 gap-4">
+      <${Rates} title="By format" rates=${s.by_format} />
+      <${Rates} title="By emotion" rates=${s.by_emotion} />
+    </div></div>`;
+}
+
+/* ------------------------------ settings ----------------------------- */
+function AccountPicker({ accounts, value, onChange }) {
+  if (accounts.length <= 1) return '';
+  return html`<select value=${value} onChange=${e => onChange(+e.target.value)}
+    class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+    ${accounts.map(a => html`<option value=${a.id}>@${a.handle}</option>`)}</select>`;
+}
+
+function Settings({ accounts, refreshAccounts }) {
+  const [form, setForm] = useState({ handle: '', niche: '', topics: '' });
+  const [voiceFor, setVoiceFor] = useState(null);
+  const [pastedPosts, setPastedPosts] = useState('');
+  const [watch, setWatch] = useState([]);
+  const [w, setW] = useState({ kind: 'youtube_channel', ref: '', label: '' });
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api('/api/watch').then(setWatch); }, []);
+
+  const createAccount = async () => {
+    await api('/api/accounts', { method: 'POST', body: {
+      handle: form.handle, niche: form.niche,
+      topics: form.topics.split(',').map(t => t.trim()).filter(Boolean) } });
+    setForm({ handle: '', niche: '', topics: '' }); refreshAccounts();
+    setMsg('Account created. Now train its voice below — paste 50-200 of its past posts.');
+  };
+  const train = async () => {
+    const posts = pastedPosts.split('\n').map(l => l.trim()).filter(Boolean);
+    setBusy(true); setMsg('');
+    try { await api(`/api/accounts/${voiceFor}/style`, { method: 'POST', body: { posts } });
+          setMsg(`Voice trained on ${posts.length} posts ✓ — drafts will now sound like this account.`);
+          setPastedPosts(''); refreshAccounts(); }
+    catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+  const addWatch = async () => {
+    await api('/api/watch', { method: 'POST', body: w });
+    setW({ ...w, ref: '', label: '' }); setWatch(await api('/api/watch'));
+  };
+  const delWatch = async (id) => { await api(`/api/watch/${id}`, { method: 'DELETE' });
+    setWatch(await api('/api/watch')); };
+
+  return html`<div class="space-y-4">
+    ${accounts.length === 0 && html`<${Card}>
+      <div class="font-medium text-lg mb-1">👋 Let's set you up (2 steps)</div>
+      <div class="text-sm text-zinc-400">1. Create your account below.
+      2. Paste your past posts to teach it your voice. That's it — drafts start appearing in Review.</div><//>`}
+
+    <${Card}><div class="font-medium mb-2">Accounts</div>
+      ${accounts.map(a => html`<div class="flex items-center gap-2 py-1 text-sm">
+        <span>@${a.handle}</span><${Chip}>${a.niche || 'no niche set'}<//>
+        ${a.has_voice ? html`<${Chip}>voice ✓ v${a.voice_version}<//>` : html`<${Chip}>⚠️ no voice yet<//>`}
+      </div>`)}
+      <div class="grid md:grid-cols-3 gap-2 mt-3">
+        <${Input} placeholder="X handle (no @)" value=${form.handle} onInput=${e => setForm({ ...form, handle: e.target.value })} />
+        <${Input} placeholder="niche — be specific, this drives everything" value=${form.niche} onInput=${e => setForm({ ...form, niche: e.target.value })} />
+        <${Input} placeholder="topics, comma separated" value=${form.topics} onInput=${e => setForm({ ...form, topics: e.target.value })} />
+      </div>
+      <div class="mt-2"><${Btn} color="blue" disabled=${!form.handle} onClick=${createAccount}>Add account<//></div>
+    <//>
+
+    <${Card}><div class="font-medium mb-2">🧬 Train a voice</div>
+      <div class="text-sm text-zinc-400 mb-2">Paste 50–200 of the account's past posts, ONE PER LINE.
+      The best predictor of quality in the whole system.</div>
+      <div class="flex gap-2 mb-2 items-center">
+        <select onChange=${e => setVoiceFor(+e.target.value)}
+          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+          <option value="">pick account…</option>
+          ${accounts.map(a => html`<option value=${a.id}>@${a.handle}</option>`)}
+        </select>
+      </div>
+      <textarea rows="8" value=${pastedPosts} onInput=${e => setPastedPosts(e.target.value)}
+        placeholder="RBI holds rates again. let that sink in&#10;New GDP numbers out. 7.2%. Sounds great until you see the base effect.&#10;…"
+        class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-sm placeholder-zinc-600"></textarea>
+      <div class="mt-2"><${Btn} color="green" disabled=${!voiceFor || busy} onClick=${train}>
+        ${busy ? 'analyzing your voice…' : 'Train voice'}<//></div>
+    <//>
+
+    <${Card}><div class="font-medium mb-2">👀 What it watches</div>
+      ${watch.map(x => html`<div class="flex items-center gap-2 py-1 text-sm">
+        <${Chip}>${x.kind}<//><span class="flex-1">${x.label || x.ref}</span>
+        <button onClick=${() => delWatch(x.id)} class="text-rose-400 text-xs">remove</button></div>`)}
+      <div class="grid md:grid-cols-4 gap-2 mt-3">
+        <select value=${w.kind} onChange=${e => setW({ ...w, kind: e.target.value })}
+          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+          <option value="youtube_channel">YouTube channel</option>
+          <option value="subreddit">Subreddit</option>
+          <option value="trends_geo">Google Trends geo</option>
+        </select>
+        <${Input} placeholder=${w.kind === 'youtube_channel' ? 'channel ID (UC…)' : w.kind === 'subreddit' ? 'subreddit name' : 'IN / US'} value=${w.ref} onInput=${e => setW({ ...w, ref: e.target.value })} />
+        <${Input} placeholder="label (optional)" value=${w.label} onInput=${e => setW({ ...w, label: e.target.value })} />
+        <${Btn} color="blue" disabled=${!w.ref} onClick=${addWatch}>Add<//>
+      </div>
+      <div class="text-xs text-zinc-500 mt-2">YouTube channel ID: channel page → ⋯ → Share channel → Copy channel ID. News feeds (65 sources) are built in.</div>
+    <//>
+    ${msg && html`<div class="text-emerald-400 text-sm">${msg}</div>`}
+  </div>`;
+}
+
+/* -------------------------------- app -------------------------------- */
+const TABS = ['Review', 'Ideas', 'Analytics', 'Settings'];
+
+function App() {
+  const [tab, setTab] = useState('Review');
+  const [accounts, setAccounts] = useState(null);
+  const [status, setStatus] = useState({});
+  const refreshAccounts = useCallback(() =>
+    api('/api/accounts').then(a => {
+      setAccounts(a); if (a.length === 0) setTab('Settings');
+    }), []);
+  useEffect(() => { refreshAccounts(); api('/api/status').then(setStatus); }, []);
+  if (accounts === null) return html`<div class="p-8 text-zinc-500">loading…</div>`;
+  return html`<div class="max-w-3xl mx-auto p-4">
+    <div class="flex items-center justify-between mb-4">
+      <div class="text-xl font-bold">⚡ Pulse</div>
+      <div class="flex items-center gap-2 text-xs text-zinc-500">
+        ${status.pending_drafts > 0 && html`<${Chip}>📝 ${status.pending_drafts} to review<//>`}
+        ${status.outbox > 0 && html`<${Chip}>📤 ${status.outbox} to post<//>`}
+        <button onClick=${() => { localStorage.removeItem('pulse_token'); location.reload(); }}
+          class="hover:text-zinc-300">logout</button>
+      </div>
+    </div>
+    <div class="flex gap-1 mb-5 bg-zinc-900 rounded-xl p-1">
+      ${TABS.map(t => html`<button onClick=${() => setTab(t)}
+        class="flex-1 py-1.5 rounded-lg text-sm font-medium
+               ${tab === t ? 'bg-zinc-700' : 'text-zinc-400 hover:text-zinc-200'}">${t}</button>`)}
+    </div>
+    ${tab === 'Review' && html`<${Review} accounts=${accounts} />`}
+    ${tab === 'Ideas' && html`<${Ideas} accounts=${accounts} />`}
+    ${tab === 'Analytics' && html`<${Analytics} accounts=${accounts} />`}
+    ${tab === 'Settings' && html`<${Settings} accounts=${accounts} refreshAccounts=${refreshAccounts} />`}
+  </div>`;
+}
+
+/* Gate: show login only when auth is actually enabled server-side. */
+function Gate() {
+  const [need, setNeed] = useState(null);
+  useEffect(() => {
+    fetch('/api/status').then(r => {
+      if (r.status === 401) setNeed(true);
+      else { localStorage.setItem('pulse_token', 'dev'); location.reload(); }
+    });
+  }, []);
+  return need ? html`<${Login} />` : html`<div class="p-8 text-zinc-500">loading…</div>`;
+}
+
+render(token() ? html`<${App} />` : html`<${Gate} />`, document.getElementById('app'));
+</script>
+</body>
+</html>

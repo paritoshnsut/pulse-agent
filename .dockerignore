@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+.env
+agent.db
+agent.db-wal
+agent.db-shm
+cards/
+.venv
+.git
+tests/
+frontend/node_modules

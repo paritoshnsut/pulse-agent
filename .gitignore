@@ -1,0 +1,10 @@
+.env
+agent.db
+__pycache__/
+agent.db-wal
+agent.db-shm
+cards/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+.DS_Store

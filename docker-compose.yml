@@ -1,0 +1,22 @@
+# One-command deployment on any VPS or home server:
+#   1. cp .env.example .env   (fill in ANTHROPIC_API_KEY, APP_PASSWORD, TELEGRAM_*)
+#   2. docker compose up -d --build
+#   3. open http://<server>:8080 — log in with APP_PASSWORD
+# Data (SQLite + cards) persists in the named volume across rebuilds.
+
+services:
+  pulse:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      DB_PATH: /data/agent.db
+      CARDS_DIR: /data/cards
+      SCHEDULER_IN_APP: "1"
+    volumes:
+      - pulse-data:/data
+    restart: unless-stopped
+
+volumes:
+  pulse-data:
