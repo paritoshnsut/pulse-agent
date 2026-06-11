@@ -1,8 +1,8 @@
 // Onboarding + persona management + voice training + watch list.
 
 import { useEffect, useState } from 'react';
-import { api } from '../api.js';
-import { Btn, Card, Chip, Input } from '../components/ui.jsx';
+import { api, apiBlob } from '../api.js';
+import { Btn, Card, Chip, Input, PageHeader } from '../components/ui.jsx';
 
 const WATCH_PLACEHOLDERS = {
   youtube_channel: 'channel ID (UC…)',
@@ -13,7 +13,7 @@ const WATCH_PLACEHOLDERS = {
 const BLANK_BRAND = { banned_words: '', word_swaps: '', disclaimers: '',
   cta_text: '', cta_url: '', website_url: '', notes: '',
   accent_color: '#4da3ff', secondary_color: '', bg_style: 'dark',
-  font_family: 'sans', watermark_text: '' };
+  font_family: 'sans', watermark_text: '', logo_url: '' };
 
 export default function Settings({ accounts, refreshAccounts }) {
   const [form, setForm] = useState({ handle: '', niche: '', topics: '', kind: '' });
@@ -28,6 +28,8 @@ export default function Settings({ accounts, refreshAccounts }) {
   const [w, setW] = useState({ kind: 'youtube_channel', ref: '', label: '' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   useEffect(() => {
     api('/api/watch').then(setWatch).catch(() => {});
@@ -49,6 +51,7 @@ export default function Settings({ accounts, refreshAccounts }) {
       secondary_color: b.secondary_color || '',
       bg_style: b.bg_style || 'dark', font_family: b.font_family || 'sans',
       watermark_text: b.watermark_text || '',
+      logo_url: b.logo_url || '',
     })).catch(() => setBrand(BLANK_BRAND));
   }, [brandFor]);
   const refreshCorpus = () =>
@@ -57,7 +60,8 @@ export default function Settings({ accounts, refreshAccounts }) {
   const applyPreset = (pid) => {
     const p = presets.find((x) => x.id === pid);
     if (p) setForm({ handle: form.handle, niche: p.niche,
-                     topics: (p.topics || []).join(', '), kind: p.kind });
+                     topics: (p.topics || []).join(', '), kind: p.kind,
+                     preset: p.id });
   };
 
   const createAccount = async () => {
@@ -67,6 +71,7 @@ export default function Settings({ accounts, refreshAccounts }) {
         handle: form.handle,
         niche: form.niche,
         kind: form.kind || null,
+        preset: form.preset || null,  // seeds the brand kit's visual defaults
         topics: form.topics.split(',').map((t) => t.trim()).filter(Boolean),
       },
     });
@@ -75,13 +80,13 @@ export default function Settings({ accounts, refreshAccounts }) {
     setMsg('Account created. Now feed its voice corpus below.');
   };
 
-  const saveBrand = async () => {
+  const brandBody = () => {
     const swaps = {};
     brand.word_swaps.split('\n').forEach((line) => {
       const [a, b] = line.split('->').map((x) => x.trim());
       if (a && b) swaps[a] = b;
     });
-    await api(`/api/accounts/${brandFor}/brand`, { method: 'POST', body: {
+    return {
       banned_words: brand.banned_words.split(',').map((x) => x.trim()).filter(Boolean),
       word_swaps: swaps,
       disclaimers: brand.disclaimers.split('\n').map((x) => x.trim()).filter(Boolean),
@@ -91,8 +96,21 @@ export default function Settings({ accounts, refreshAccounts }) {
       secondary_color: brand.secondary_color || null,
       bg_style: brand.bg_style || null, font_family: brand.font_family || null,
       watermark_text: brand.watermark_text || null,
-    } });
+      logo_url: brand.logo_url || null,
+    };
+  };
+
+  const saveBrand = async () => {
+    await api(`/api/accounts/${brandFor}/brand`, { method: 'POST', body: brandBody() });
     setMsg('Brand kit saved — every draft now obeys these rules.');
+  };
+
+  const previewBrand = async () => {
+    setPreviewBusy(true);
+    try {
+      setPreviewUrl(await apiBlob(`/api/accounts/${brandFor}/brand/preview`,
+        { method: 'POST', body: brandBody() }));
+    } catch (e) { setMsg(e.message); } finally { setPreviewBusy(false); }
   };
 
   const addToCorpus = async () => {
@@ -135,6 +153,8 @@ export default function Settings({ accounts, refreshAccounts }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="Settings"
+        desc="Accounts, voice training, brand identity, and what the agent watches." />
       {accounts.length === 0 && (
         <Card>
           <div className="font-medium text-lg mb-1">👋 Let's set you up (2 steps)</div>
@@ -238,7 +258,18 @@ export default function Settings({ accounts, refreshAccounts }) {
               <Input placeholder="watermark text" value={brand.watermark_text}
                 onInput={(e) => setBrand({ ...brand, watermark_text: e.target.value })} />
             </div>
-            <Btn color="blue" onClick={saveBrand}>Save brand kit</Btn>
+            <Input placeholder="logo URL (PNG/JPG — appears on every graphic)" value={brand.logo_url}
+              onInput={(e) => setBrand({ ...brand, logo_url: e.target.value })} />
+            <div className="flex gap-2 items-center">
+              <Btn color="blue" onClick={saveBrand}>Save brand kit</Btn>
+              <Btn color="zinc" disabled={previewBusy} onClick={previewBrand}>
+                {previewBusy ? 'rendering…' : '👁 Preview the look'}
+              </Btn>
+            </div>
+            {previewUrl && (
+              <img src={previewUrl} alt="brand preview"
+                   className="rounded-xl border border-zinc-800 max-w-lg w-full mt-2" />
+            )}
           </div>
         )}
       </Card>

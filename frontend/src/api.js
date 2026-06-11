@@ -25,3 +25,21 @@ export async function api(path, opts = {}) {
   }
   return res.json();
 }
+
+// Same as api() but returns an object URL for binary responses (image previews).
+export async function apiBlob(path, opts = {}) {
+  const token = await (async () => tokenProvider())();
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))).detail;
+    throw new Error(detail || res.statusText);
+  }
+  return URL.createObjectURL(await res.blob());
+}

@@ -76,6 +76,42 @@ def choose_template(post: dict) -> tuple[str, dict]:
     return "insight_card", {"title": title, "text": text}
 
 
+_LOGO_CACHE: dict = {}
+
+
+def logo_asset(logo_url: Optional[str], height: int = 40) -> Optional[dict]:
+    """Fetch a brand logo and prepare it for Satori: a data URL plus explicit
+    width/height (Satori requires both; Pillow measures the aspect ratio).
+    Cached per URL; any failure -> None (logo is decoration, never a blocker)."""
+    if not logo_url:
+        return None
+    if logo_url in _LOGO_CACHE:
+        return _LOGO_CACHE[logo_url]
+    try:
+        import base64
+        import io
+
+        import requests
+        from PIL import Image
+
+        resp = requests.get(logo_url, timeout=10)
+        resp.raise_for_status()
+        img = Image.open(io.BytesIO(resp.content))
+        w = max(1, round(img.width * height / img.height))
+        mime = resp.headers.get("Content-Type", "").split(";")[0] or "image/png"
+        if not mime.startswith("image/"):
+            mime = "image/png"
+        asset = {
+            "src": f"data:{mime};base64,{base64.b64encode(resp.content).decode()}",
+            "width": w, "height": height,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Logo fetch failed for %s: %s", logo_url, exc)
+        asset = None
+    _LOGO_CACHE[logo_url] = asset
+    return asset
+
+
 def brand_payload(account: dict, kit: Optional[dict]) -> dict:
     return {
         "accent_color": (kit or {}).get("accent_color"),
@@ -85,6 +121,7 @@ def brand_payload(account: dict, kit: Optional[dict]) -> dict:
         "watermark_text": (kit or {}).get("watermark_text")
                           or (settings.ai_label or "").strip(),
         "handle": account.get("handle") or "",
+        "logo": logo_asset((kit or {}).get("logo_url")),
     }
 
 
@@ -284,11 +321,12 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
 
 
 def generate_for_post(post_id: int, db_path: Optional[str] = None,
-                      renderer=None) -> Optional[str]:
+                      renderer=None, template: Optional[str] = None) -> Optional[str]:
     """Render the branded visual for a post; saves PNG(s) into visuals_dir and
     returns the (cover) path (None when disabled/failed — never raises).
     Multi-idea formats (thread / linkedin_post / newsletter) become square
-    carousels; everything else gets a single 16:9 card."""
+    carousels; everything else gets a single 16:9 card. An explicit `template`
+    overrides auto-pick (the review card's swap-template control)."""
     if not settings.visuals_enabled:
         return None
     post = memory.get_post(post_id, db_path=db_path)
@@ -299,12 +337,25 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
 
     r = renderer or SatoriRenderer()
 
-    if (post.get("format") or "") in CAROUSEL_FORMATS:
+    if template is None and (post.get("format") or "") in CAROUSEL_FORMATS:
         cover = generate_carousel(post, account, kit, r, db_path=db_path)
         if cover:
             return cover  # carousel done; otherwise fall through to a card
 
-    template, data = choose_template(post)
+    auto_template, data = choose_template(post)
+    if template and template != auto_template:
+        # swapping template: rebuild the data shape the target template expects
+        text = data.get("text") or " ".join(
+            filter(None, [data.get("stat"), data.get("context")]))
+        if template == "stat_highlight":
+            stat = extract_stat(text)
+            data = {"stat": stat or "", "context": text.replace(stat, "").strip(" .—–:,-")
+                    if stat else text}
+        elif template == "quote_card":
+            data = {"text": text}
+        else:
+            data = {"title": "", "text": text}
+    template = template or auto_template
     brand = brand_payload(account, kit)
     png = r.render(template, data, brand)
     used = template

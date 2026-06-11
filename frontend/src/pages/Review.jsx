@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Btn, Card, Chip, Input, copyText } from '../components/ui.jsx';
+import { Btn, Card, Chip, Input, PageHeader, copyText } from '../components/ui.jsx';
 
 function DraftCard({ p, refresh }) {
   const [pkg, setPkg] = useState(null);
@@ -178,9 +178,23 @@ function DraftCard({ p, refresh }) {
             <div>
               <img src={pkg.card_url} alt="post card"
                    className="rounded-xl border border-zinc-800 max-w-md w-full" />
-              <a href={pkg.card_url} download className="text-sky-400 text-sm">
-                download card (attach it when composing)
-              </a>
+              <div className="flex gap-2 items-center mt-1.5 flex-wrap">
+                <a href={pkg.card_url} download className="text-sky-400 text-sm">
+                  download ↓
+                </a>
+                {['quote_card', 'stat_highlight', 'insight_card'].map((t) => (
+                  <Btn key={t} color="zinc" disabled={busy} className="!py-1 !px-2 text-xs"
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const r = await api(`/api/drafts/${p.id}/visual?template=${t}`, { method: 'POST' });
+                        setPkg({ ...pkg, card_url: r.card_url, visual_urls: [r.card_url] });
+                      } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+                    }}>
+                    ↻ {t.replace('_', ' ')}
+                  </Btn>
+                ))}
+              </div>
             </div>
           )}
           {pkg.timing && <div className="text-sm text-zinc-400">⏰ {pkg.timing}</div>}
@@ -228,6 +242,8 @@ export default function Review({ accounts }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="Review"
+        desc="Every draft the agent produces lands here. Approve to get the post-ready package, steer it to rewrite, reject to teach the voice." />
       {drafts.length === 0 && outbox.length === 0 && (
         <Card>
           <div className="text-zinc-400">

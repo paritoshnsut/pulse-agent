@@ -56,16 +56,17 @@ brain; visuals are the multiplier.
 | Dockerfile: node binary + render bundle in the runtime image | ✅ |
 | Tests: template mapping, payload shape, fallback, brand fields; real-render smoke (skipped when node deps absent) | ✅ |
 
-## Phase V1.5 — breadth & polish (next)
+## Phase V1.5 — breadth & polish
 
 | Item | Status |
 |---|---|
 | **Carousel**: square (1080×1080) cover + N content slides + CTA closer; threads map tweet-per-slide, long-form packs paragraphs under a per-slide budget; cover hook auto-extracted (first sentence of huge openers); thin content falls back to a single card, as does any slide-render failure (no half-carousels). All slides pushed to Telegram individually + downloadable strip in web review. | ✅ |
-| Logo image rendering (data-URL embed into Satori; logo upload stored on /data) | ⏳ |
-| Per-preset visual defaults (SaaS = clean blue/sans, D2C = warm, …) | ⏳ |
-| Live template preview in web Settings (see the look while editing the kit) | ⏳ |
-| Regenerate/swap-template control on the review card | ⏳ |
+| Logo image rendering: Python fetches + sizes via Pillow → data-URL → Satori footer (cached; failure-safe) | ✅ |
+| Per-preset visual defaults — picking a preset seeds the brand kit (SaaS indigo/sans, D2C warm/light, finance emerald/mono, …) | ✅ |
+| Live preview in web Settings: renders a sample card with the UNSAVED editor values | ✅ |
+| Regenerate/swap-template control on the review card (quote/stat/insight) | ✅ |
 | Visual approve/reject signal (start collecting preference data) | ⏳ |
+| **Font architecture note:** fontsource browser subsets DON'T work with Satori (no same-family multi-file fallback → ₹ tofu). Fixed: `merge_fonts.py` builds single merged ttf per family/weight (committed in `render/fonts/`), and every stack ends in Noto Sans for cross-family glyph fallback. | ✅ |
 | More templates: announcement card, list/tips card, before-after | ⏳ |
 
 ## Phase V2 — the AI-imagery design agent (planned, not started)

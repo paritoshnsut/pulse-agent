@@ -9,30 +9,35 @@
 
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { TEMPLATES, TEMPLATE_SIZES, SIZE } from "./templates.mjs";
 
-const require = createRequire(import.meta.url);
+const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.VISUALS_PORT || "8787", 10);
 
-function font(pkg, file, family, weight) {
-  return {
-    name: family,
-    data: readFileSync(require.resolve(`${pkg}/files/${file}`)),
-    weight,
-    style: "normal",
-  };
+// Fonts: pre-merged single files (latin + latin-ext) built by merge_fonts.py
+// and committed in fonts/. One file per (family, weight) — satori does NOT
+// fall back across multiple files of the same family, so browser-style
+// subset files render tofu for anything in the -ext range (₹!). Noto Sans
+// closes every font stack in templates.mjs: cross-FAMILY fallback does work,
+// and Noto carries ₹ where Lora/JetBrains Mono lack the glyph entirely.
+function font(file, family, weight) {
+  return { name: family, data: readFileSync(join(HERE, "fonts", file)),
+           weight, style: "normal" };
 }
 
 const FONTS = [
-  font("@fontsource/inter", "inter-latin-400-normal.woff", "Inter", 400),
-  font("@fontsource/inter", "inter-latin-700-normal.woff", "Inter", 700),
-  font("@fontsource/lora", "lora-latin-400-normal.woff", "Lora", 400),
-  font("@fontsource/lora", "lora-latin-700-normal.woff", "Lora", 700),
-  font("@fontsource/jetbrains-mono", "jetbrains-mono-latin-400-normal.woff", "JetBrains Mono", 400),
-  font("@fontsource/jetbrains-mono", "jetbrains-mono-latin-700-normal.woff", "JetBrains Mono", 700),
+  font("Inter-400.ttf", "Inter", 400),
+  font("Inter-700.ttf", "Inter", 700),
+  font("Lora-400.ttf", "Lora", 400),
+  font("Lora-700.ttf", "Lora", 700),
+  font("JetBrainsMono-400.ttf", "JetBrains Mono", 400),
+  font("JetBrainsMono-700.ttf", "JetBrains Mono", 700),
+  font("NotoSans-400.ttf", "Noto Sans", 400),
+  font("NotoSans-700.ttf", "Noto Sans", 700),
 ];
 
 async function renderPNG(template, data, brand) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { AccountPicker, Card } from '../components/ui.jsx';
+import { AccountPicker, Card, PageHeader } from '../components/ui.jsx';
 
 function Rates({ title, rates }) {
   const entries = Object.entries(rates || {});
@@ -44,6 +44,8 @@ export default function Analytics({ accounts }) {
   ];
   return (
     <div className="space-y-4">
+      <PageHeader title="Analytics"
+        desc="What the learning loops know so far: approval rates, which formats and emotions land, and your best posting windows." />
       <AccountPicker accounts={accounts} value={id} onChange={setAcct} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {tiles.map(([k, v]) => (

@@ -1,20 +1,31 @@
 // App shell: fetches /api/config, runs the right auth flow (Supabase session
-// / family password / dev), then renders the four tabs. The Supabase client
+// / family password / dev), then renders the sidebar app. The Supabase client
 // is created at runtime from server config, so one build works on any
 // deployment — no rebuild to change projects.
 
 import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import {
+  BarChart3, Inbox, LayoutDashboard, Lightbulb, LogOut, Recycle, Settings as SettingsIcon, Zap,
+} from 'lucide-react';
 import { api, setOnUnauthorized, setTokenProvider } from './api.js';
 import Login from './auth/Login.jsx';
+import Dashboard from './pages/Dashboard.jsx';
 import Review from './pages/Review.jsx';
 import Repurpose from './pages/Repurpose.jsx';
 import Ideas from './pages/Ideas.jsx';
 import Analytics from './pages/Analytics.jsx';
 import Settings from './pages/Settings.jsx';
-import { Chip } from './components/ui.jsx';
+import { Chip, Dot } from './components/ui.jsx';
 
-const TABS = ['Review', 'Repurpose', 'Ideas', 'Analytics', 'Settings'];
+const NAV = [
+  { id: 'Dashboard', icon: LayoutDashboard },
+  { id: 'Review', icon: Inbox },
+  { id: 'Repurpose', icon: Recycle },
+  { id: 'Ideas', icon: Lightbulb },
+  { id: 'Analytics', icon: BarChart3 },
+  { id: 'Settings', icon: SettingsIcon },
+];
 
 export default function App() {
   const [config, setConfig] = useState(null);
@@ -51,7 +62,7 @@ export default function App() {
     })();
   }, []);
 
-  if (!ready) return <div className="p-8 text-zinc-500">loading…</div>;
+  if (!ready) return <div className="p-8 text-zinc-600 text-sm">loading…</div>;
   if (!authed) {
     return (
       <Login
@@ -68,22 +79,21 @@ export default function App() {
 }
 
 function Shell({ config, supabase, setAuthed }) {
-  const [tab, setTab] = useState('Review');
+  const [tab, setTab] = useState('Dashboard');
   const [accounts, setAccounts] = useState(null);
   const [status, setStatus] = useState({});
 
   const refreshAccounts = useCallback(
-    () =>
-      api('/api/accounts').then((a) => {
-        setAccounts(a);
-        if (a.length === 0) setTab('Settings');
-      }),
+    () => api('/api/accounts').then(setAccounts),
     []
   );
 
   useEffect(() => {
     refreshAccounts().catch(() => {});
-    api('/api/status').then(setStatus).catch(() => {});
+    const loadStatus = () => api('/api/status').then(setStatus).catch(() => {});
+    loadStatus();
+    const t = setInterval(loadStatus, 60000);
+    return () => clearInterval(t);
   }, [refreshAccounts]);
 
   const logout = async () => {
@@ -92,36 +102,97 @@ function Shell({ config, supabase, setAuthed }) {
     setAuthed(false);
   };
 
-  if (accounts === null) return <div className="p-8 text-zinc-500">loading…</div>;
+  if (accounts === null) return <div className="p-8 text-zinc-600 text-sm">loading…</div>;
+
+  const badge = { Review: status.pending_drafts || 0 };
 
   return (
-    <div className="max-w-3xl mx-auto p-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-xl font-bold">⚡ Pulse</div>
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          {status.pending_drafts > 0 && <Chip>📝 {status.pending_drafts} to review</Chip>}
-          {status.outbox > 0 && <Chip>📤 {status.outbox} to post</Chip>}
-          {status.user_email && <span>{status.user_email}</span>}
-          <button onClick={logout} className="hover:text-zinc-300">logout</button>
+    <div className="flex min-h-screen">
+      {/* ───────────── sidebar (desktop) ───────────── */}
+      <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-zinc-800/70
+        bg-zinc-950 px-3 py-5 sticky top-0 h-screen">
+        <div className="flex items-center gap-2 px-3 mb-7">
+          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500
+            flex items-center justify-center shadow-lg shadow-indigo-950">
+            <Zap size={17} className="text-white" fill="currentColor" />
+          </div>
+          <div>
+            <div className="font-bold tracking-tight leading-none">Pulse</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">content copilot</div>
+          </div>
         </div>
-      </div>
-      <div className="flex gap-1 mb-5 bg-zinc-900 rounded-xl p-1">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-1.5 rounded-lg text-sm font-medium
-              ${tab === t ? 'bg-zinc-700' : 'text-zinc-400 hover:text-zinc-200'}`}
-          >
-            {t}
+
+        <nav className="space-y-1 flex-1">
+          {NAV.map(({ id, icon: Icon }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm
+                font-medium transition-colors
+                ${tab === id
+                  ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 border border-transparent'}`}>
+              <Icon size={17} />
+              <span className="flex-1 text-left">{id}</span>
+              {badge[id] > 0 && (
+                <span className="text-[11px] font-bold bg-indigo-500 text-white
+                  rounded-full px-1.5 py-0.5 min-w-[20px] text-center">{badge[id]}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        <div className="border-t border-zinc-800/70 pt-3 px-2 space-y-2">
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <Dot on={!!status.scheduler_in_app} />
+            {status.scheduler_in_app ? 'agent running' : 'agent paused'}
+          </div>
+          {status.user_email && (
+            <div className="text-xs text-zinc-600 truncate">{status.user_email}</div>
+          )}
+          <button onClick={logout}
+            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300">
+            <LogOut size={13} /> sign out
           </button>
-        ))}
+        </div>
+      </aside>
+
+      {/* ───────────── main column ───────────── */}
+      <div className="flex-1 min-w-0">
+        {/* mobile top nav */}
+        <div className="md:hidden sticky top-0 z-20 bg-zinc-950/90 backdrop-blur
+          border-b border-zinc-800/70 px-3 py-2 flex items-center gap-1 overflow-x-auto">
+          <Zap size={18} className="text-indigo-400 shrink-0 mr-1" fill="currentColor" />
+          {NAV.map(({ id, icon: Icon }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs
+                font-medium whitespace-nowrap
+                ${tab === id ? 'bg-indigo-500/15 text-indigo-300' : 'text-zinc-400'}`}>
+              <Icon size={14} />{id}
+              {badge[id] > 0 && <span className="text-[10px] font-bold text-indigo-300">({badge[id]})</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* topbar (desktop) */}
+        <div className="hidden md:flex items-center justify-end gap-2 px-8 pt-5">
+          {status.spend_today_usd !== undefined && (
+            <Chip tone={status.spend_today_usd >= (status.daily_budget_usd || Infinity) ? 'red' : 'zinc'}>
+              💰 ${Number(status.spend_today_usd).toFixed(2)}
+              {status.daily_budget_usd ? ` / $${Number(status.daily_budget_usd).toFixed(0)}` : ''} today
+            </Chip>
+          )}
+          {status.outbox > 0 && <Chip tone="amber">📤 {status.outbox} to post</Chip>}
+          {!!status.telegram_configured && <Chip tone="green">📱 telegram</Chip>}
+        </div>
+
+        <main className="px-4 md:px-8 py-5 md:py-6 max-w-6xl mx-auto">
+          {tab === 'Dashboard' && <Dashboard accounts={accounts} go={setTab} />}
+          {tab === 'Review' && <Review accounts={accounts} />}
+          {tab === 'Repurpose' && <Repurpose accounts={accounts} />}
+          {tab === 'Ideas' && <Ideas accounts={accounts} />}
+          {tab === 'Analytics' && <Analytics accounts={accounts} />}
+          {tab === 'Settings' && <Settings accounts={accounts} refreshAccounts={refreshAccounts} />}
+        </main>
       </div>
-      {tab === 'Review' && <Review accounts={accounts} />}
-      {tab === 'Repurpose' && <Repurpose accounts={accounts} />}
-      {tab === 'Ideas' && <Ideas accounts={accounts} />}
-      {tab === 'Analytics' && <Analytics accounts={accounts} />}
-      {tab === 'Settings' && <Settings accounts={accounts} refreshAccounts={refreshAccounts} />}
     </div>
   );
 }

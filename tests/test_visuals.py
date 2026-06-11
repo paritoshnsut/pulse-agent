@@ -204,6 +204,93 @@ def test_carousel_abandons_on_slide_failure_falls_back_to_card(temp_db, tmp_path
     assert "visual_slides" not in meta            # no half-carousel recorded
 
 
+# --------------------------------------------------------------- V1.5 bits
+def test_template_override_rebuilds_data(temp_db, tmp_path, monkeypatch):
+    patch_settings(monkeypatch, visuals, visuals_dir=str(tmp_path), visuals_enabled=True)
+    acct, pid = _seed_post(temp_db)  # "GDP grew 7.2% — look closer." -> stat by default
+    seen = {}
+
+    class FakeRenderer:
+        def render(self, template, data, brand):
+            seen.update(template=template, data=data)
+            return PNG_MAGIC + b"x"
+
+    # force the quote template instead of the auto-picked stat card
+    visuals.generate_for_post(pid, db_path=temp_db, renderer=FakeRenderer(),
+                              template="quote_card")
+    assert seen["template"] == "quote_card"
+    assert "7.2%" in seen["data"]["text"]          # full text, not stat split
+
+
+def test_template_override_skips_carousel(temp_db, tmp_path, monkeypatch):
+    patch_settings(monkeypatch, visuals, visuals_dir=str(tmp_path), visuals_enabled=True)
+    acct = memory.upsert_account(handle="me", db_path=temp_db)
+    pid = memory.save_post(acct, "thread", "x",
+                           meta={"tweets": ["hook", "one", "two"]}, db_path=temp_db)
+    calls = []
+
+    class FakeRenderer:
+        def render(self, template, data, brand):
+            calls.append(template)
+            return PNG_MAGIC + b"x"
+
+    visuals.generate_for_post(pid, db_path=temp_db, renderer=FakeRenderer(),
+                              template="insight_card")
+    assert calls == ["insight_card"]               # single card, no carousel
+
+
+def test_logo_asset_builds_data_url(monkeypatch):
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 100), "#ff0000").save(buf, "PNG")
+    png_bytes = buf.getvalue()
+
+    class FakeResp:
+        content = png_bytes
+        headers = {"Content-Type": "image/png"}
+        def raise_for_status(self): pass
+
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResp())
+    visuals._LOGO_CACHE.clear()
+    asset = visuals.logo_asset("https://x/logo.png", height=40)
+    assert asset["src"].startswith("data:image/png;base64,")
+    assert asset["height"] == 40 and asset["width"] == 80   # aspect preserved
+    # cached: second call doesn't re-fetch
+    monkeypatch.setattr(requests, "get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError))
+    assert visuals.logo_asset("https://x/logo.png") == asset
+    assert visuals.logo_asset(None) is None
+
+
+def test_brand_payload_includes_logo(temp_db, monkeypatch):
+    monkeypatch.setattr(visuals, "logo_asset",
+                        lambda url, height=40: {"src": "data:x", "width": 1, "height": 1}
+                        if url else None)
+    p = visuals.brand_payload({"handle": "me"}, {"logo_url": "https://x/l.png"})
+    assert p["logo"]["src"] == "data:x"
+
+
+def test_preset_seeds_brand_kit_visuals(temp_db, monkeypatch):
+    from fastapi.testclient import TestClient
+    from api import main as api_main
+
+    # dev-mode auth + temp db (a local .env may set APP_PASSWORD)
+    patch_settings(monkeypatch, api_main, app_password="",
+                   supabase_url="", supabase_jwt_secret="")
+    monkeypatch.setattr(api_main, "DB", temp_db)
+    client = TestClient(api_main.app)
+    acct = client.post("/api/accounts",
+                       json={"handle": "brandy", "preset": "saas_founder"}).json()
+    kit = memory.get_brand_kit(acct["id"], db_path=temp_db)
+    assert kit["accent_color"] == "#6366f1" and kit["bg_style"] == "dark"
+    # presets list exposes the visual for swatches
+    ps_list = client.get("/api/presets").json()
+    saas = next(p for p in ps_list if p["id"] == "saas_founder")
+    assert saas["visual"]["accent_color"] == "#6366f1"
+
+
 # ------------------------------------------------------- real render smoke
 node_ready = (shutil.which("node") is not None
               and (Path(__file__).parent.parent / "render" / "node_modules" / "satori").exists())

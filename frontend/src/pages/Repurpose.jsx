@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { api } from '../api.js';
-import { AccountPicker, Btn, Card } from '../components/ui.jsx';
+import { AccountPicker, Btn, Card, PageHeader } from '../components/ui.jsx';
 
 export default function Repurpose({ accounts }) {
   const [acct, setAcct] = useState(null);
@@ -28,6 +28,8 @@ export default function Repurpose({ accounts }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="Repurpose"
+        desc="One input — a blog post, podcast transcript, launch note — becomes a full pack of platform-shaped drafts in your voice, carousel included." />
       <AccountPicker accounts={accounts} value={id} onChange={setAcct} />
       <Card>
         <div className="font-medium mb-1">📦 Content Squeezer</div>

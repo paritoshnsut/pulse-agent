@@ -10,8 +10,8 @@ const SIZE = { width: 1200, height: 675 };      // 16:9 — single cards (X/Link
 const SQUARE = { width: 1080, height: 1080 };   // 1:1 — carousel slides (LinkedIn/IG)
 
 const DEFAULTS = {
-  accent: "#4da3ff",
-  secondary: "#9aa4b2",
+  accent_color: "#4da3ff",
+  secondary_color: "#9aa4b2",
   bg_style: "dark",
   font_family: "sans",
 };
@@ -23,16 +23,18 @@ function theme(brand) {
     Object.entries(brand || {}).filter(([, v]) => v)) };
   const dark = b.bg_style !== "light";
   return {
-    accent: b.accent,
-    secondary: b.secondary,
-    font: FONT_NAMES[b.font_family] || "Inter",
+    accent: b.accent_color,
+    secondary: b.secondary_color,
+    // Noto Sans ends every stack: cross-family glyph fallback (₹ etc.)
+    font: `${FONT_NAMES[b.font_family] || "Inter"}, Noto Sans`,
     fg: dark ? "#f0f2f5" : "#16181d",
     muted: dark ? "#8b94a1" : "#6b7280",
     background: b.bg_style === "gradient"
-      ? `linear-gradient(135deg, #101319 0%, #1a2030 55%, ${b.accent}33 100%)`
+      ? `linear-gradient(135deg, #101319 0%, #1a2030 55%, ${b.accent_color}33 100%)`
       : dark ? "#101319" : "#fafafa",
     watermark: b.watermark_text || "",
     handle: b.handle || "",
+    logo: b.logo || null,   // {src: dataURL, width, height} prepared by Python
   };
 }
 
@@ -61,13 +63,23 @@ function accentBar(t) {
 }
 
 function footer(t) {
-  const kids = [];
-  if (t.handle) kids.push(el("div", { fontSize: 26, fontWeight: 700, color: t.accent, display: "flex" }, `@${t.handle.replace(/^@/, "")}`));
-  kids.push(el("div", { fontSize: 22, color: t.muted, display: "flex" },
-    t.watermark || " "));
+  const left = [];
+  if (t.logo) {
+    left.push({ type: "img", props: {
+      src: t.logo.src, width: t.logo.width, height: t.logo.height,
+      style: { width: t.logo.width, height: t.logo.height },
+    } });
+  }
+  if (t.handle) {
+    left.push(el("div", { fontSize: 26, fontWeight: 700, color: t.accent, display: "flex" },
+      `@${t.handle.replace(/^@/, "")}`));
+  }
   return el("div", {
     display: "flex", justifyContent: "space-between", alignItems: "center",
-  }, kids);
+  }, [
+    el("div", { display: "flex", alignItems: "center", gap: 14 }, left),
+    el("div", { fontSize: 22, color: t.muted, display: "flex" }, t.watermark || " "),
+  ]);
 }
 
 // ---------------------------------------------------------------- templates

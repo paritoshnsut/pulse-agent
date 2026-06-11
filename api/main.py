@@ -136,6 +136,7 @@ class AccountBody(BaseModel):
     verticals: list[str] = []
     regions: list[str] = []
     kind: Optional[str] = None
+    preset: Optional[str] = None  # preset id — seeds the brand kit's visual defaults
 
 
 class BrandBody(BaseModel):
@@ -264,6 +265,12 @@ def create_account(body: AccountBody, user: dict = Depends(require_auth)):
         topics=body.topics, verticals=body.verticals or None,
         regions=body.regions or None, owner_id=user["id"], kind=body.kind,
         db_path=_db())
+    # a preset seeds the brand kit's visual identity (only if none exists yet)
+    if body.preset and not memory.get_brand_kit(acct_id, db_path=_db()):
+        from presets import PRESETS
+        visual = PRESETS.get(body.preset, {}).get("visual")
+        if visual:
+            memory.save_brand_kit(acct_id, visual, db_path=_db())
     return memory.get_account(acct_id, db_path=_db())
 
 
@@ -288,6 +295,39 @@ def save_brand(account_id: int, body: BrandBody, user: dict = Depends(require_au
     _own_account(account_id, user)
     memory.save_brand_kit(account_id, body.model_dump(), db_path=_db())
     return {"ok": True}
+
+
+@app.post("/api/accounts/{account_id}/brand/preview")
+def brand_preview(account_id: int, body: BrandBody, user: dict = Depends(require_auth)):
+    """Live preview: render a sample card with the (possibly unsaved) brand
+    values from the editor, so you see the look before you commit it."""
+    account = _own_account(account_id, user)
+    from fastapi import Response
+    from pipeline import visuals
+    brand = visuals.brand_payload(account, body.model_dump())
+    png = visuals.SatoriRenderer().render(
+        "quote_card",
+        {"text": "This is how your branded graphics will look — colors, font, "
+                 "and watermark come from your kit."},
+        brand)
+    if png is None:
+        raise HTTPException(status_code=503,
+                            detail="render service unavailable — try again shortly")
+    return Response(content=png, media_type="image/png")
+
+
+@app.post("/api/drafts/{post_id}/visual")
+def regenerate_visual(post_id: int, template: Optional[str] = None,
+                      user: dict = Depends(require_auth)):
+    """Re-render a draft's visual, optionally as a different template (the
+    swap control on the review card)."""
+    _own_post(post_id, user)
+    from pipeline.visuals import generate_for_post
+    path = generate_for_post(post_id, db_path=_db(), template=template)
+    if not path:
+        raise HTTPException(status_code=503, detail="visual generation failed")
+    mount = "visuals" if Path(path).parent == Path(settings.visuals_dir) else "cards"
+    return {"card_url": f"/{mount}/{Path(path).name}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -559,6 +599,40 @@ def add_watch(body: WatchBody):
 def delete_watch(watch_id: int):
     memory.remove_watch(watch_id, db_path=_db())
     return {"ok": True}
+
+
+@app.get("/api/dashboard")
+def dashboard(user: dict = Depends(require_auth)):
+    """Everything the home screen needs in one call: today's agent activity,
+    setup progress, and recent drafts — the 'you can see it working' view."""
+    accounts = _my_accounts(user)
+    ids = [a["id"] for a in accounts]
+    counts = memory.dashboard_counts(ids, db_path=_db())
+    has_voice = any(memory.get_style_dna(i, db_path=_db()) for i in ids)
+    has_brand = any(memory.get_brand_kit(i, db_path=_db()) for i in ids)
+    recent = [p for p in memory.get_posts(db_path=_db()) if p["account_id"] in set(ids)][:6]
+    return {
+        **counts,
+        "pending_drafts": len([p for p in memory.get_posts(status="draft", db_path=_db())
+                               if p["account_id"] in set(ids)]),
+        "outbox": len([p for p in memory.get_outbox(db_path=_db())
+                       if p["account_id"] in set(ids)]),
+        "watch_sources": len(memory.get_watch(db_path=_db())),
+        "spend_today_usd": memory.cost_today(db_path=_db()),
+        "daily_budget_usd": settings.daily_budget_usd,
+        "scheduler_in_app": os.getenv("SCHEDULER_IN_APP", "0") in ("1", "true", "yes"),
+        "telegram_configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        "setup": {
+            "account": len(accounts) > 0,
+            "voice": has_voice,
+            "brand": has_brand,
+            "watching": len(memory.get_watch(db_path=_db())) > 0,
+            "telegram": bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        },
+        "recent": [{"id": p["id"], "format": p["format"], "status": p["status"],
+                    "created_at": p["created_at"],
+                    "content": p["content"][:140]} for p in recent],
+    }
 
 
 @app.get("/api/status")

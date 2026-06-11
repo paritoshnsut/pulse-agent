@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { AccountPicker, Btn, Card, Input } from '../components/ui.jsx';
+import { AccountPicker, Btn, Card, Input, PageHeader } from '../components/ui.jsx';
 
 export default function Ideas({ accounts }) {
   const [acct, setAcct] = useState(null);
@@ -32,6 +32,8 @@ export default function Ideas({ accounts }) {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="Ideas"
+        desc="The mid-tier signals worth a look, your morning briefing, and evergreen — a post from your standing arguments when news is slow." />
       <AccountPicker accounts={accounts} value={id} onChange={setAcct} />
       <Card>
         <div className="font-medium mb-2">🌲 Evergreen — no news needed</div>

@@ -990,6 +990,36 @@ def get_post_engagement(account_id: int, db_path: Optional[str] = None) -> list[
         return [dict(r) for r in rows]
 
 
+def dashboard_counts(account_ids: list[int], db_path: Optional[str] = None) -> dict:
+    """Today-so-far numbers for the dashboard: ingestion is global (the
+    watchers serve everyone); signals/drafts/posted are scoped to the given
+    accounts. All 'today' = since UTC midnight."""
+    midnight = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    out = {"articles_today": 0, "signals_today": {}, "drafted_today": 0,
+           "posted_today": 0}
+    with get_conn(db_path) as conn:
+        out["articles_today"] = conn.execute(
+            "SELECT COUNT(*) AS n FROM articles WHERE fetched_at >= ?",
+            (midnight,)).fetchone()["n"]
+        if account_ids:
+            ph = ",".join("?" * len(account_ids))
+            rows = conn.execute(
+                f"""SELECT tier, COUNT(*) AS n FROM signals
+                    WHERE created_at >= ? AND account_id IN ({ph})
+                    GROUP BY tier""",
+                [midnight] + account_ids).fetchall()
+            out["signals_today"] = {r["tier"]: r["n"] for r in rows}
+            out["drafted_today"] = conn.execute(
+                f"""SELECT COUNT(*) AS n FROM posts
+                    WHERE created_at >= ? AND account_id IN ({ph})""",
+                [midnight] + account_ids).fetchone()["n"]
+            out["posted_today"] = conn.execute(
+                f"""SELECT COUNT(*) AS n FROM posts
+                    WHERE posted_at >= ? AND account_id IN ({ph})""",
+                [midnight] + account_ids).fetchone()["n"]
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Claude cost ledger + backups
 # --------------------------------------------------------------------------- #

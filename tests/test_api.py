@@ -81,6 +81,16 @@ def test_voice_training_endpoint(client, temp_db, monkeypatch):
     assert client.get("/api/accounts").json()[0]["has_voice"] is True
 
 
+def test_dashboard_endpoint(client, temp_db):
+    acct = client.post("/api/accounts", json={"handle": "me"}).json()
+    memory.save_post(acct["id"], "hot_take", "a draft", db_path=temp_db)
+    d = client.get("/api/dashboard").json()
+    assert d["pending_drafts"] == 1 and d["drafted_today"] == 1
+    assert d["setup"]["account"] is True and d["setup"]["voice"] is False
+    assert d["recent"][0]["content"] == "a draft"
+    assert "spend_today_usd" in d and "signals_today" in d
+
+
 def test_brand_and_presets_endpoints(client, temp_db):
     acct = client.post("/api/accounts",
                        json={"handle": "brand", "kind": "brand"}).json()
