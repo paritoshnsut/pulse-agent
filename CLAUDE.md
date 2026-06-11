@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **269 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **282 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -17,11 +17,20 @@
 
 ## What Pulse is
 
-An autonomous content **copilot** for political/news accounts. It watches the
-world 24/7, scores what's worth reacting to, drafts in *your* trained voice,
-guards the draft (facts, stance consistency, backlash), and hands you a
-one-tap manual post — **you press Post on X**, so there's nothing to flag as a
-bot. It learns from every approve/reject/edit + engagement number you feed it.
+An autonomous content **copilot for any account that needs to post** — a
+person, a brand, a creator, a business. It watches *your* world 24/7 (news,
+social, or your own business inputs), scores what's worth saying, drafts in
+*your* trained voice and brand, guards the draft (facts, stance consistency,
+backlash, brand compliance), and hands you a one-tap manual post. It learns
+from every approve/reject/edit/steer + engagement number you feed it.
+
+> **Positioning (v1 → marketing tool):** politics is just one vertical of
+> marketing. The engine is domain-agnostic — the wedge is the *autonomous,
+> always-watching, learns-your-voice agent* ("you never face a blank page"),
+> which is identical for a crypto founder, a D2C brand, a SaaS, or a
+> politician. "Marketing-ready v1" (de-politicize + Content Squeezer + Brand
+> Kit) ships that pivot. Multi-platform APIs, visual generation, agency mode,
+> and triggers are the planned next phases — see the roadmap below + `DEFERRED.md`.
 
 One deliberate departure from the original brief: **no auto-posting to X.**
 Automated posting from a personal account is the fastest way to get flagged,
@@ -212,6 +221,23 @@ All guards **flag, never block** (you review everything) and are **fail-safe**
 
 ---
 
+## Marketing pivot — "content tool for everyone"
+
+The vision widened from political commentator to **a content/marketing engine
+for any brand, creator, or business.** Shipped in v1; the rest is the roadmap.
+
+| Feature | Status | Notes |
+|---|---|---|
+| **De-politicized engine** | ✅ | decision agent reframed for person/brand/creator; account `kind`; vertical **presets** (SaaS, D2C, creator, finance, fitness, local, agency, political) prefill onboarding |
+| **Content Squeezer (repurpose)** | ✅ | one input (blog/podcast/launch/newsletter; paste or URL) → a pack of platform-shaped drafts (LinkedIn post, threads, standalone insights, newsletter, video script). Zero polling setup; the blank-page killer. |
+| **Text Brand Kit** | ✅ | banned words, preferred swaps ("cheap"→"affordable"), disclaimers, default CTA, brand notes — injected into generation AND enforced deterministically; off-brand drafts flagged. Applies on every generation path via `style/voice.py`. |
+| Multi-platform native output + scheduling | ⏸ | LinkedIn/Instagram/Threads APIs (brand pages permit scheduled posting — unlike personal X). Phase 2. |
+| Trigger-to-Content (webhooks: GitHub/Shopify/Stripe/calendar) | ⏸ | generalizes the watch layer to business events. Phase 2. |
+| Agency mode + magic-link client approvals | ⏸ | the lucrative multi-seat segment. Phase 3. |
+| Content calendar / campaign planner | ⏸ | cadence + themes + "fill my week". Phase 3. |
+| Visual generation v2 (carousels, branded graphics, Canva/Figma) | ⏸ | the expensive frontier — validate text-first. |
+| Social listening (tamed lead-gen — copilot reply, never auto-spam) | ⏸ | needs paid social read; auto-reply-to-strangers deliberately refused. |
+
 ## Party mode (enterprise) — all ⏸ deferred
 
 100-variant generator, worker account manager, war-room analytics, opponent
@@ -262,12 +288,13 @@ refuse on principle; a model can't feel virality from text.
 ```
 pipeline/   monitor decision context generator scorer poster telegram_bot
             updater callbacks counter evergreen fatigue timing briefing
-            grounding integrity feedback llm memory
-style/      dna corpus crowd learning scorer
+            grounding integrity feedback llm repurpose memory
+style/      dna corpus crowd learning scorer brand voice
 watch/      youtube reddit trends twitter(stub)
 image/      cards
+presets.py  onboarding starter packs            sources.py  65-feed catalog
 api/        main.py (+ static fallback)         frontend/  React app
-db/         schema.sql                          tests/     269 tests
+db/         schema.sql                          tests/     282 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
 ```
 

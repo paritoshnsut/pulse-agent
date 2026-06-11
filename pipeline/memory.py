@@ -62,13 +62,16 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     acct_cols = {r["name"] for r in conn.execute("PRAGMA table_info(accounts)")}
     for col, decl in (("verticals", "TEXT"), ("regions", "TEXT"),
                       ("active", "INTEGER NOT NULL DEFAULT 1"),
-                      ("owner_id", "TEXT")):  # supabase user id; NULL = shared
+                      ("owner_id", "TEXT"),  # supabase user id; NULL = shared
+                      ("kind", "TEXT NOT NULL DEFAULT 'commentator'")):
         if col not in acct_cols:
             conn.execute(f"ALTER TABLE accounts ADD COLUMN {col} {decl}")
     post_cols = {r["name"] for r in conn.execute("PRAGMA table_info(posts)")}
     for col in ("posted_at", "posted_url"):
         if col not in post_cols:
             conn.execute(f"ALTER TABLE posts ADD COLUMN {col} TEXT")
+    if "pack_id" not in post_cols:
+        conn.execute("ALTER TABLE posts ADD COLUMN pack_id INTEGER")
     sig_cols = {r["name"] for r in conn.execute("PRAGMA table_info(signals)")}
     for col in ("topic", "format"):
         if col not in sig_cols:
@@ -103,11 +106,13 @@ def upsert_account(
     verticals: Optional[list[str]] = None,
     regions: Optional[list[str]] = None,
     owner_id: Optional[str] = None,
+    kind: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> int:
     """Insert an account or return the existing id for (handle, platform).
-    On an existing row, refresh niche/topics/verticals/regions/owner if given.
-    owner_id is the Supabase user id; NULL means shared (family/dev mode)."""
+    On an existing row, refresh fields if given. owner_id is the Supabase user
+    id (NULL = shared). kind is commentator|brand|creator|... (flavors the
+    decision agent's framing)."""
     with get_conn(db_path) as conn:
         cur = conn.execute(
             "SELECT id FROM accounts WHERE handle = ? AND platform = ?",
@@ -121,14 +126,15 @@ def upsert_account(
                      topics = COALESCE(?, topics),
                      verticals = COALESCE(?, verticals),
                      regions = COALESCE(?, regions),
-                     owner_id = COALESCE(?, owner_id)
+                     owner_id = COALESCE(?, owner_id),
+                     kind = COALESCE(?, kind)
                    WHERE id = ?""",
                 (
                     niche,
                     json.dumps(topics) if topics is not None else None,
                     json.dumps(verticals) if verticals is not None else None,
                     json.dumps(regions) if regions is not None else None,
-                    owner_id,
+                    owner_id, kind,
                     row["id"],
                 ),
             )
@@ -136,14 +142,14 @@ def upsert_account(
         cur = conn.execute(
             """INSERT INTO accounts
                (handle, platform, niche, topics, verticals, regions, owner_id,
-                active, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                kind, active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (
                 handle, platform, niche,
                 json.dumps(topics or []),
                 json.dumps(verticals) if verticals is not None else None,
                 json.dumps(regions) if regions is not None else None,
-                owner_id,
+                owner_id, kind or "commentator",
                 _now(),
             ),
         )
@@ -345,6 +351,84 @@ def get_signals_by_tier(tier: str, db_path: Optional[str] = None) -> list[dict]:
             (tier,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Brand kit (per-account content rules) + content packs (repurpose runs)
+# --------------------------------------------------------------------------- #
+_BRAND_JSON = ("banned_words", "word_swaps", "disclaimers")
+
+
+def save_brand_kit(account_id: int, kit: dict, db_path: Optional[str] = None) -> None:
+    """Upsert the brand kit for an account. JSON fields stored as text."""
+    now = _now()
+    vals = {
+        "banned_words": json.dumps(kit.get("banned_words") or []),
+        "word_swaps": json.dumps(kit.get("word_swaps") or {}),
+        "disclaimers": json.dumps(kit.get("disclaimers") or []),
+        "cta_text": kit.get("cta_text"), "cta_url": kit.get("cta_url"),
+        "website_url": kit.get("website_url"), "notes": kit.get("notes"),
+    }
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """INSERT INTO brand_kit
+               (account_id, banned_words, word_swaps, disclaimers, cta_text,
+                cta_url, website_url, notes, created_at, updated_at)
+               VALUES (:aid, :banned_words, :word_swaps, :disclaimers, :cta_text,
+                       :cta_url, :website_url, :notes, :now, :now)
+               ON CONFLICT(account_id) DO UPDATE SET
+                   banned_words=excluded.banned_words, word_swaps=excluded.word_swaps,
+                   disclaimers=excluded.disclaimers, cta_text=excluded.cta_text,
+                   cta_url=excluded.cta_url, website_url=excluded.website_url,
+                   notes=excluded.notes, updated_at=excluded.updated_at""",
+            {"aid": account_id, "now": now, **vals},
+        )
+
+
+def get_brand_kit(account_id: int, db_path: Optional[str] = None) -> Optional[dict]:
+    with get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM brand_kit WHERE account_id = ?",
+                           (account_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        for k in _BRAND_JSON:
+            try:
+                d[k] = json.loads(d[k]) if d[k] else ([] if k != "word_swaps" else {})
+            except (json.JSONDecodeError, TypeError):
+                d[k] = [] if k != "word_swaps" else {}
+        return d
+
+
+def create_content_pack(account_id: int, source_title: Optional[str],
+                        source_url: Optional[str], source_excerpt: Optional[str],
+                        db_path: Optional[str] = None) -> int:
+    with get_conn(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO content_packs
+               (account_id, source_title, source_url, source_excerpt, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (account_id, source_title, source_url, source_excerpt, _now()),
+        )
+        return cur.lastrowid
+
+
+def set_post_pack(post_id: int, pack_id: int, db_path: Optional[str] = None) -> None:
+    with get_conn(db_path) as conn:
+        conn.execute("UPDATE posts SET pack_id = ? WHERE id = ?", (pack_id, post_id))
+
+
+def get_pack_posts(pack_id: int, db_path: Optional[str] = None) -> list[dict]:
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM posts WHERE pack_id = ? ORDER BY id", (pack_id,)
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["meta_json"] = json.loads(d["meta_json"]) if d["meta_json"] else {}
+            out.append(d)
+        return out
 
 
 # --------------------------------------------------------------------------- #

@@ -39,7 +39,7 @@ from pipeline.llm import tracked_create
 from pipeline import memory, poster
 from pipeline.context import extract_keywords
 from pipeline.generator import ContentGenerator
-from style.crowd import effective_genome
+from style.voice import effective_for
 from style.scorer import PersonaConsistencyScorer
 
 logger = logging.getLogger("callbacks")
@@ -147,7 +147,7 @@ class CallbackWatcher:
             logger.warning("[%s] prediction resolved but no Style DNA — not drafting.",
                            account.get("handle"))
             return None
-        genome = effective_genome(dna["genome_a"], dna["genome_b"], dna["blend"])
+        genome = effective_for(account["id"], db_path=self.db_path)
         word = verdict["resolution"].upper()
         signal = {
             "title": article["title"],

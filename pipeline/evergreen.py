@@ -31,7 +31,7 @@ from config import settings
 from pipeline import memory, poster
 from pipeline.context import ContextRetriever
 from pipeline.generator import ContentGenerator
-from style.crowd import effective_genome
+from style.voice import effective_for
 from style.scorer import PersonaConsistencyScorer
 
 logger = logging.getLogger("evergreen")
@@ -90,7 +90,7 @@ class EvergreenGenerator:
                         account.get("handle"))
             return None
 
-        genome = effective_genome(dna["genome_a"], dna["genome_b"], dna["blend"])
+        genome = effective_for(account["id"], db_path=self.db_path)
         readable = picked["topic"].replace("-", " ")
         signal = {
             "title": f"(evergreen — no news peg) Your standing argument on {readable}",

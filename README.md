@@ -1,4 +1,16 @@
-# Pulse — single-user content agent
+# Pulse — autonomous content copilot for any brand, creator, or commentator
+
+> Started as a political/news commentator agent; now a domain-agnostic content
+> engine. The wedge is the same for everyone: an autonomous agent that watches
+> your world, learns your voice + brand, and never lets you face a blank page.
+> **Marketing-ready v1** adds: vertical presets (SaaS/D2C/creator/finance/…),
+> the **Content Squeezer** (one blog/podcast → a pack of platform-shaped
+> drafts), and a **Brand Kit** (banned words, swaps, CTAs, disclaimers — obeyed
+> on every draft). See [CLAUDE.md](CLAUDE.md) for full status + roadmap.
+
+---
+
+
 
 Watches the news + social signals on a schedule, decides what's worth reacting
 to, drafts posts in *your* voice, and gates them for quality — on its own, every

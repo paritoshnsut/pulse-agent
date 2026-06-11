@@ -27,7 +27,7 @@ from pipeline.decision import DecisionAgent
 from pipeline.generator import ContentGenerator
 from pipeline.monitor import NewsMonitor
 from sources import feeds_for
-from style.crowd import effective_genome
+from style.voice import effective_for
 from style.scorer import PersonaConsistencyScorer
 
 logging.basicConfig(level=logging.INFO, format="%(name)s | %(levelname)s | %(message)s")
@@ -71,8 +71,7 @@ def main() -> None:
     if not genome_row:
         print("No Style DNA yet — run `python -m style.dna` on your posts to enable drafting.")
     else:
-        genome = effective_genome(genome_row["genome_a"], genome_row["genome_b"],
-                                  genome_row["blend"])
+        genome = effective_for(acct_id)
         gen, scorer = ContentGenerator(), PersonaConsistencyScorer()
         retriever = ContextRetriever()
         shortlist = (memory.get_signals_by_tier("FIRE")

@@ -21,7 +21,7 @@ from typing import Optional
 
 from pipeline import memory
 from pipeline.generator import ContentGenerator
-from style.crowd import effective_genome
+from style.voice import effective_for
 
 logger = logging.getLogger("feedback")
 
@@ -49,7 +49,7 @@ def regenerate_with_steer(post_id: int, instruction: str,
     if not dna:
         return {"ok": False, "error": "no voice trained for this account"}
 
-    genome = effective_genome(dna["genome_a"], dna["genome_b"], dna["blend"])
+    genome = effective_for(post["account_id"], db_path=db_path)
     is_thread = post["format"] == "thread" or THREAD_SEP in post["content"]
     try:
         new = ContentGenerator().rewrite(post["content"], instruction, genome,

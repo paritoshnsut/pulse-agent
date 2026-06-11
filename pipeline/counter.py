@@ -32,7 +32,7 @@ from pipeline.llm import tracked_create
 from pipeline import memory, poster
 from pipeline.context import ContextRetriever, extract_keywords
 from pipeline.generator import ContentGenerator
-from style.crowd import effective_genome
+from style.voice import effective_for
 from style.scorer import PersonaConsistencyScorer
 
 logger = logging.getLogger("counter")
@@ -131,7 +131,7 @@ class CounterNarrativeDetector:
         dna = memory.get_style_dna(account["id"], db_path=self.db_path)
         if not dna:
             return None
-        genome = effective_genome(dna["genome_a"], dna["genome_b"], dna["blend"])
+        genome = effective_for(account["id"], db_path=self.db_path)
         counter_signal = {**signal, "angle": found["missing_angle"]}
         base_ctx = ContextRetriever(db_path=self.db_path).context_for(signal, account)
         consensus = f"What every outlet is saying (push against this): {found['consensus']}"

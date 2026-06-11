@@ -81,6 +81,34 @@ def test_voice_training_endpoint(client, temp_db, monkeypatch):
     assert client.get("/api/accounts").json()[0]["has_voice"] is True
 
 
+def test_brand_and_presets_endpoints(client, temp_db):
+    acct = client.post("/api/accounts",
+                       json={"handle": "brand", "kind": "brand"}).json()
+    assert acct["kind"] == "brand"
+    assert client.get(f"/api/accounts/{acct['id']}/brand").json() == {}
+    client.post(f"/api/accounts/{acct['id']}/brand", json={
+        "banned_words": ["cheap"], "word_swaps": {"client": "partner"},
+        "cta_text": "Try free"})
+    kit = client.get(f"/api/accounts/{acct['id']}/brand").json()
+    assert kit["banned_words"] == ["cheap"] and kit["cta_text"] == "Try free"
+    presets = client.get("/api/presets").json()
+    assert any(p["id"] == "saas_founder" for p in presets)
+
+
+def test_repurpose_endpoint(client, temp_db, monkeypatch):
+    import pipeline.repurpose as rp
+    acct = client.post("/api/accounts", json={"handle": "brand"}).json()
+    monkeypatch.setattr(rp.ContentSqueezer, "squeeze",
+                        lambda self, account, **kw: {"ok": True, "pack_id": 1,
+                                                     "drafts": [], "live": 5})
+    r = client.post("/api/repurpose", json={"account_id": acct["id"], "text": "blog"})
+    assert r.status_code == 200 and r.json()["live"] == 5
+    monkeypatch.setattr(rp.ContentSqueezer, "squeeze",
+                        lambda self, account, **kw: {"ok": False, "error": "no voice"})
+    assert client.post("/api/repurpose",
+                       json={"account_id": acct["id"], "text": "x"}).status_code == 400
+
+
 def test_corpus_endpoints(client, temp_db, monkeypatch):
     from style import corpus as corpus_mod
 

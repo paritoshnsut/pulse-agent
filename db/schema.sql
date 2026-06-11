@@ -19,9 +19,38 @@ CREATE TABLE IF NOT EXISTS accounts (
     verticals   TEXT,                       -- JSON array; null/[] = all verticals
     regions     TEXT,                       -- JSON array; null/[] = all regions
     owner_id    TEXT,                       -- supabase user id; NULL = shared
+    kind        TEXT NOT NULL DEFAULT 'commentator',  -- commentator | brand | creator | ...
     active      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     UNIQUE(handle, platform)
+);
+
+-- Per-account brand kit: the rules a brand's content must obey. Banned words,
+-- preferred swaps ("cheap"->"affordable"), required disclaimers, default CTA,
+-- compliance notes. Injected into generation AND enforced deterministically.
+CREATE TABLE IF NOT EXISTS brand_kit (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL UNIQUE REFERENCES accounts(id),
+    banned_words TEXT,                       -- JSON array
+    word_swaps   TEXT,                       -- JSON object {bad: good}
+    disclaimers  TEXT,                       -- JSON array (appended where relevant)
+    cta_text     TEXT,
+    cta_url      TEXT,
+    website_url  TEXT,
+    notes        TEXT,                       -- freeform brand voice / compliance notes
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+-- A repurpose run: one source input expanded into a pack of drafts. Posts
+-- carry pack_id so a generated content pack can be shown together.
+CREATE TABLE IF NOT EXISTS content_packs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id     INTEGER NOT NULL REFERENCES accounts(id),
+    source_title   TEXT,
+    source_url     TEXT,
+    source_excerpt TEXT,
+    created_at     TEXT NOT NULL
 );
 
 -- Raw ingested content from every source. UNIQUE(url) is the dedup key:
@@ -149,6 +178,7 @@ CREATE TABLE IF NOT EXISTS posts (
     persona_score REAL,                     -- composite consistency score 0-100
     needs_review  INTEGER NOT NULL DEFAULT 0,
     status        TEXT NOT NULL DEFAULT 'draft',  -- draft|approved|edited|rejected|posted
+    pack_id       INTEGER REFERENCES content_packs(id),  -- repurpose pack grouping
     posted_at     TEXT,                     -- when YOU posted it (manual flow)
     posted_url    TEXT,                     -- live URL, if you logged it
     created_at    TEXT NOT NULL,

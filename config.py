@@ -194,6 +194,18 @@ class Settings:
     # inspiration training set, so one columnist can't warp `influences`.
     corpus_source_cap_fraction: float = float(os.getenv("CORPUS_SOURCE_CAP_FRACTION", "0.5"))
 
+    # --- Content Squeezer (repurpose one input into a multi-format pack).
+    # Each tuple is (format, count). Text-only formats — multi-platform APIs
+    # and visual generation are a later phase. ---
+    repurpose_plan: tuple = (
+        ("linkedin_post", 1),
+        ("thread", 2),
+        ("quote_context", 3),
+        ("newsletter", 1),
+        ("video_script", 1),
+    )
+    repurpose_max_chars: int = int(os.getenv("REPURPOSE_MAX_CHARS", "12000"))
+
     # --- Audience fatigue detector: don't draft the Nth take on one topic ---
     fatigue_window_hours: int = int(os.getenv("FATIGUE_WINDOW_HOURS", "72"))
     fatigue_max_posts: int = int(os.getenv("FATIGUE_MAX_POSTS", "3"))

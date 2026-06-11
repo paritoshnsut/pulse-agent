@@ -17,6 +17,7 @@ function DraftCard({ p, refresh }) {
   const conflicts = meta.stance_conflicts || [];
   const riskVectors = (meta.risk_level === 'high' || meta.risk_level === 'medium')
     ? (meta.risk_vectors || []) : [];
+  const brandViolations = meta.brand_violations || [];
   const ageH = Math.round((Date.now() - new Date(p.created_at)) / 36e5);
   const [steer, setSteer] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -100,6 +101,13 @@ function DraftCard({ p, refresh }) {
           {riskVectors.map((v, i) => (
             <div key={i} className="text-orange-200/90 mt-1">• {v}</div>
           ))}
+        </div>
+      )}
+      {brandViolations.length > 0 && (
+        <div className="mt-3 rounded-lg border border-fuchsia-800 bg-fuchsia-950/40 p-3 text-sm">
+          <div className="font-medium text-fuchsia-300">
+            🛡️ Off-brand — uses banned words: {brandViolations.join(', ')}
+          </div>
         </div>
       )}
 

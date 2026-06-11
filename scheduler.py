@@ -56,7 +56,8 @@ from pipeline.generator import ContentGenerator
 from pipeline.monitor import NewsMonitor
 from pipeline.telegram_bot import TelegramCommander
 from sources import feeds_for
-from style.crowd import CrowdWisdomScraper, effective_genome
+from style.crowd import CrowdWisdomScraper
+from style.voice import effective_for
 from style.learning import ReviewLearner
 from style.scorer import PersonaConsistencyScorer
 from watch.reddit import RedditWatcher
@@ -201,7 +202,7 @@ def job_process():
             continue
 
         # Blend in crowd patterns (Genome B) when they exist; pure Genome A otherwise.
-        genome = effective_genome(dna["genome_a"], dna["genome_b"], dna["blend"])
+        genome = effective_for(acct["id"])
         # only draft this account's own fresh, unposted FIRE/WARM signals
         shortlist = [s for s in (memory.get_signals_by_tier("FIRE")
                                  + memory.get_signals_by_tier("WARM"))

@@ -135,6 +135,24 @@ class AccountBody(BaseModel):
     topics: list[str] = []
     verticals: list[str] = []
     regions: list[str] = []
+    kind: Optional[str] = None
+
+
+class BrandBody(BaseModel):
+    banned_words: list[str] = []
+    word_swaps: dict[str, str] = {}
+    disclaimers: list[str] = []
+    cta_text: Optional[str] = None
+    cta_url: Optional[str] = None
+    website_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RepurposeBody(BaseModel):
+    account_id: int
+    text: Optional[str] = None
+    url: Optional[str] = None
+    title: Optional[str] = None
 
 
 class StyleBody(BaseModel):
@@ -237,8 +255,54 @@ def create_account(body: AccountBody, user: dict = Depends(require_auth)):
     acct_id = memory.upsert_account(
         handle=body.handle.strip().lstrip("@"), niche=body.niche,
         topics=body.topics, verticals=body.verticals or None,
-        regions=body.regions or None, owner_id=user["id"], db_path=_db())
+        regions=body.regions or None, owner_id=user["id"], kind=body.kind,
+        db_path=_db())
     return memory.get_account(acct_id, db_path=_db())
+
+
+@app.get("/api/presets")
+def get_presets(user: dict = Depends(require_auth)):
+    """Starter packs for onboarding any kind of account (public-ish; authed)."""
+    from presets import list_presets
+    return list_presets()
+
+
+# --------------------------------------------------------------------------- #
+# Routes — brand kit
+# --------------------------------------------------------------------------- #
+@app.get("/api/accounts/{account_id}/brand")
+def get_brand(account_id: int, user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    return memory.get_brand_kit(account_id, db_path=_db()) or {}
+
+
+@app.post("/api/accounts/{account_id}/brand")
+def save_brand(account_id: int, body: BrandBody, user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    memory.save_brand_kit(account_id, body.model_dump(), db_path=_db())
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Routes — Content Squeezer (repurpose)
+# --------------------------------------------------------------------------- #
+@app.post("/api/repurpose")
+def repurpose(body: RepurposeBody, user: dict = Depends(require_auth)):
+    account = _own_account(body.account_id, user)
+    from pipeline.repurpose import ContentSqueezer
+    out = ContentSqueezer(db_path=_db()).squeeze(
+        account, text=body.text, url=body.url, title=body.title)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error"))
+    return out
+
+
+@app.get("/api/packs/{pack_id}")
+def pack(pack_id: int, user: dict = Depends(require_auth)):
+    posts = memory.get_pack_posts(pack_id, db_path=_db())
+    if posts:
+        _own_account(posts[0]["account_id"], user)
+    return posts
 
 
 @app.get("/api/accounts/{account_id}/style")

@@ -8,12 +8,13 @@ import { createClient } from '@supabase/supabase-js';
 import { api, setOnUnauthorized, setTokenProvider } from './api.js';
 import Login from './auth/Login.jsx';
 import Review from './pages/Review.jsx';
+import Repurpose from './pages/Repurpose.jsx';
 import Ideas from './pages/Ideas.jsx';
 import Analytics from './pages/Analytics.jsx';
 import Settings from './pages/Settings.jsx';
 import { Chip } from './components/ui.jsx';
 
-const TABS = ['Review', 'Ideas', 'Analytics', 'Settings'];
+const TABS = ['Review', 'Repurpose', 'Ideas', 'Analytics', 'Settings'];
 
 export default function App() {
   const [config, setConfig] = useState(null);
@@ -117,6 +118,7 @@ function Shell({ config, supabase, setAuthed }) {
         ))}
       </div>
       {tab === 'Review' && <Review accounts={accounts} />}
+      {tab === 'Repurpose' && <Repurpose accounts={accounts} />}
       {tab === 'Ideas' && <Ideas accounts={accounts} />}
       {tab === 'Analytics' && <Analytics accounts={accounts} />}
       {tab === 'Settings' && <Settings accounts={accounts} refreshAccounts={refreshAccounts} />}

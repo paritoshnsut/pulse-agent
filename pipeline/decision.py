@@ -59,11 +59,14 @@ logger = logging.getLogger("decision")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 SYSTEM_PROMPT = (
-    "You are the editorial judgment of a single social-media commentator. "
-    "You decide whether a news item is worth reacting to for THIS account, given "
-    "its niche and stated positions. You are decisive and you do not inflate "
-    "scores: most news is a SKIP. Respond with ONLY a JSON object, no prose, no "
-    "markdown fences."
+    "You are the editorial brain of a single social-media account — which may "
+    "be a person, a brand, a creator, or a business. You decide whether an "
+    "incoming item is worth posting about for THIS account, given its niche, "
+    "goals, and stated positions. A commentator reacts to news; a brand posts "
+    "about what's relevant to its product and audience — judge by fit to the "
+    "account, not by newsworthiness in the abstract. You are decisive and do "
+    "not inflate scores: most items are a SKIP. Respond with ONLY a JSON "
+    "object, no prose, no markdown fences."
 )
 
 
@@ -202,10 +205,12 @@ class DecisionAgent:
     # ------------------------------------------------------------- Claude
     def _build_user_prompt(self, article: dict, account: dict) -> str:
         topics = account.get("topics") or "[]"
+        kind = account.get("kind") or "commentator"
         return (
-            f"ACCOUNT NICHE: {account.get('niche') or 'general political commentary'}\n"
+            f"ACCOUNT TYPE: {kind}\n"
+            f"ACCOUNT NICHE: {account.get('niche') or 'general commentary'}\n"
             f"PREFERRED TOPICS (JSON): {topics}\n\n"
-            f"NEWS ITEM\n"
+            f"INCOMING ITEM\n"
             f"Title: {article.get('title')}\n"
             f"Source: {article.get('source_name')}\n"
             f"Description: {article.get('description') or '(none)'}\n\n"

@@ -10,24 +10,49 @@ const WATCH_PLACEHOLDERS = {
   trends_geo: 'IN / US',
 };
 
+const BLANK_BRAND = { banned_words: '', word_swaps: '', disclaimers: '',
+  cta_text: '', cta_url: '', website_url: '', notes: '' };
+
 export default function Settings({ accounts, refreshAccounts }) {
-  const [form, setForm] = useState({ handle: '', niche: '', topics: '' });
+  const [form, setForm] = useState({ handle: '', niche: '', topics: '', kind: '' });
+  const [presets, setPresets] = useState([]);
   const [voiceFor, setVoiceFor] = useState('');
   const [pasted, setPasted] = useState('');
   const [kind, setKind] = useState('own');
   const [corpus, setCorpus] = useState(null);
+  const [brandFor, setBrandFor] = useState('');
+  const [brand, setBrand] = useState(BLANK_BRAND);
   const [watch, setWatch] = useState([]);
   const [w, setW] = useState({ kind: 'youtube_channel', ref: '', label: '' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { api('/api/watch').then(setWatch).catch(() => {}); }, []);
+  useEffect(() => {
+    api('/api/watch').then(setWatch).catch(() => {});
+    api('/api/presets').then(setPresets).catch(() => {});
+  }, []);
   useEffect(() => {
     if (voiceFor) api(`/api/accounts/${voiceFor}/corpus`).then(setCorpus).catch(() => {});
     else setCorpus(null);
   }, [voiceFor]);
+  useEffect(() => {
+    if (!brandFor) { setBrand(BLANK_BRAND); return; }
+    api(`/api/accounts/${brandFor}/brand`).then((b) => setBrand({
+      banned_words: (b.banned_words || []).join(', '),
+      word_swaps: Object.entries(b.word_swaps || {}).map(([k, v]) => `${k} -> ${v}`).join('\n'),
+      disclaimers: (b.disclaimers || []).join('\n'),
+      cta_text: b.cta_text || '', cta_url: b.cta_url || '',
+      website_url: b.website_url || '', notes: b.notes || '',
+    })).catch(() => setBrand(BLANK_BRAND));
+  }, [brandFor]);
   const refreshCorpus = () =>
     voiceFor && api(`/api/accounts/${voiceFor}/corpus`).then(setCorpus).catch(() => {});
+
+  const applyPreset = (pid) => {
+    const p = presets.find((x) => x.id === pid);
+    if (p) setForm({ handle: form.handle, niche: p.niche,
+                     topics: (p.topics || []).join(', '), kind: p.kind });
+  };
 
   const createAccount = async () => {
     await api('/api/accounts', {
@@ -35,12 +60,29 @@ export default function Settings({ accounts, refreshAccounts }) {
       body: {
         handle: form.handle,
         niche: form.niche,
+        kind: form.kind || null,
         topics: form.topics.split(',').map((t) => t.trim()).filter(Boolean),
       },
     });
-    setForm({ handle: '', niche: '', topics: '' });
+    setForm({ handle: '', niche: '', topics: '', kind: '' });
     refreshAccounts();
     setMsg('Account created. Now feed its voice corpus below.');
+  };
+
+  const saveBrand = async () => {
+    const swaps = {};
+    brand.word_swaps.split('\n').forEach((line) => {
+      const [a, b] = line.split('->').map((x) => x.trim());
+      if (a && b) swaps[a] = b;
+    });
+    await api(`/api/accounts/${brandFor}/brand`, { method: 'POST', body: {
+      banned_words: brand.banned_words.split(',').map((x) => x.trim()).filter(Boolean),
+      word_swaps: swaps,
+      disclaimers: brand.disclaimers.split('\n').map((x) => x.trim()).filter(Boolean),
+      cta_text: brand.cta_text || null, cta_url: brand.cta_url || null,
+      website_url: brand.website_url || null, notes: brand.notes || null,
+    } });
+    setMsg('Brand kit saved — every draft now obeys these rules.');
   };
 
   const addToCorpus = async () => {
@@ -104,8 +146,17 @@ export default function Settings({ accounts, refreshAccounts }) {
               : <Chip>⚠️ no voice yet</Chip>}
           </div>
         ))}
-        <div className="grid md:grid-cols-3 gap-2 mt-3">
-          <Input placeholder="X handle (no @)" value={form.handle}
+        {presets.length > 0 && (
+          <div className="mt-3">
+            <select onChange={(e) => applyPreset(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm w-full">
+              <option value="">start from a template (politics, SaaS, D2C, creator, finance…)</option>
+              {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="grid md:grid-cols-3 gap-2 mt-2">
+          <Input placeholder="handle (no @)" value={form.handle}
                  onInput={(e) => setForm({ ...form, handle: e.target.value })} />
           <Input placeholder="niche — be specific, this drives everything" value={form.niche}
                  onInput={(e) => setForm({ ...form, niche: e.target.value })} />
@@ -114,7 +165,47 @@ export default function Settings({ accounts, refreshAccounts }) {
         </div>
         <div className="mt-2">
           <Btn color="blue" disabled={!form.handle} onClick={createAccount}>Add account</Btn>
+          {form.kind && <span className="text-xs text-zinc-500 ml-2">type: {form.kind}</span>}
         </div>
+      </Card>
+
+      <Card>
+        <div className="font-medium mb-2">🛡️ Brand kit</div>
+        <div className="text-sm text-zinc-400 mb-2">
+          The rules every draft must obey — banned words, preferred swaps, a
+          default CTA, disclaimers. Enforced on every generation path.
+        </div>
+        <select value={brandFor} onChange={(e) => setBrandFor(e.target.value)}
+          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm mb-2">
+          <option value="">pick account…</option>
+          {accounts.map((a) => <option key={a.id} value={a.id}>@{a.handle}</option>)}
+        </select>
+        {brandFor && (
+          <div className="space-y-2">
+            <Input placeholder="banned words, comma separated (e.g. cheap, guys)"
+                   value={brand.banned_words}
+                   onInput={(e) => setBrand({ ...brand, banned_words: e.target.value })} />
+            <textarea rows="3" placeholder={'preferred swaps, one per line:\ncheap -> affordable\nclient -> partner'}
+              value={brand.word_swaps}
+              onInput={(e) => setBrand({ ...brand, word_swaps: e.target.value })}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-sm placeholder-zinc-600" />
+            <textarea rows="2" placeholder="disclaimers, one per line (e.g. Not financial advice.)"
+              value={brand.disclaimers}
+              onInput={(e) => setBrand({ ...brand, disclaimers: e.target.value })}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-sm placeholder-zinc-600" />
+            <div className="grid md:grid-cols-2 gap-2">
+              <Input placeholder="default CTA text" value={brand.cta_text}
+                     onInput={(e) => setBrand({ ...brand, cta_text: e.target.value })} />
+              <Input placeholder="CTA / website URL" value={brand.cta_url}
+                     onInput={(e) => setBrand({ ...brand, cta_url: e.target.value })} />
+            </div>
+            <textarea rows="2" placeholder="brand voice / compliance notes (freeform)"
+              value={brand.notes}
+              onInput={(e) => setBrand({ ...brand, notes: e.target.value })}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-sm placeholder-zinc-600" />
+            <Btn color="blue" onClick={saveBrand}>Save brand kit</Btn>
+          </div>
+        )}
       </Card>
 
       <Card>

@@ -138,6 +138,27 @@ FORMATS: dict[str, tuple[str, bool]] = {
         "'breaking', no reference to any specific fresh event.",
         False,
     ),
+    # --- repurpose-targeted formats (Content Squeezer; not signal-reactive) ---
+    "linkedin_post": (
+        "Repurpose the SOURCE CONTENT above into a LinkedIn post. Professional "
+        "but human; a strong first-line hook; short one-to-two-line paragraphs "
+        "with line breaks; one clear takeaway. 120-250 words. Draw only on the "
+        "source — do not invent facts or numbers.",
+        False,
+    ),
+    "newsletter": (
+        "Repurpose the SOURCE CONTENT above into a short newsletter section: a "
+        "subject-line-worthy hook, 2-3 tight scannable paragraphs, one clear "
+        "takeaway. Warm and direct. Source facts only.",
+        False,
+    ),
+    "video_script": (
+        "Repurpose the SOURCE CONTENT above into a 30-45 second short-form "
+        "video script: a 1-line hook, then 3-5 punchy spoken beats each on its "
+        "own line, then a closing line/CTA. Spoken-word cadence, not prose. "
+        "Source facts only. Return the script in 'text'.",
+        False,
+    ),
 }
 
 # Formats the decision agent may pick per signal. Excluded: callback (only the
@@ -146,7 +167,12 @@ FORMATS: dict[str, tuple[str, bool]] = {
 # with transcripts), evergreen (not news-tied; produced on demand).
 CHOOSABLE_FORMATS = tuple(k for k in FORMATS
                           if k not in ("callback", "counter_narrative",
-                                       "video_reaction", "evergreen"))
+                                       "video_reaction", "evergreen",
+                                       "linkedin_post", "newsletter", "video_script"))
+
+# Formats the Content Squeezer produces when repurposing one input.
+REPURPOSE_FORMATS = ("linkedin_post", "newsletter", "video_script", "thread",
+                     "quote_context", "data_story", "explainer", "hot_take")
 
 
 def _strip_fence(text: str) -> str:
@@ -218,6 +244,12 @@ def _style_rules(genome: dict) -> str:
             f"Hooks: {cw.get('hooks')}. Shapes: {cw.get('structures')}. "
             f"Emotional registers being rewarded: {cw.get('emotional_registers')}.\n"
         )
+    brand = genome.get("brand")
+    if brand:
+        from style.brand import render_rules
+        block = render_rules(brand)
+        if block:
+            rules += block + "\n"
     return rules
 
 
@@ -316,6 +348,11 @@ class ContentGenerator:
         style = (genome.get("hashtag_style") or "").lower()
         if "lowercase" in style:
             text = HASHTAG.sub(lambda m: m.group(0).lower(), text)
+        # brand word swaps (deterministic — "cheap" -> "affordable")
+        brand = genome.get("brand")
+        if brand:
+            from style.brand import enforce as brand_enforce
+            text, _ = brand_enforce(text, brand)
         # collapse whitespace introduced by stripping
         text = re.sub(r"[ \t]{2,}", " ", text).strip()
         text = re.sub(r"\n{3,}", "\n\n", text)
@@ -526,12 +563,22 @@ class ContentGenerator:
                 best["risk_vectors"] = rk["vectors"]
                 if rk["risk_level"] == "high":
                     best["needs_review"] = True
+            # brand compliance: banned words that survived enforcement (no swap
+            # defined) get flagged for the human — deterministic, free
+            brand = genome.get("brand")
+            if brand:
+                from style.brand import enforce as brand_enforce
+                _, survivors = brand_enforce(best["content"], brand)
+                if survivors:
+                    best["brand_violations"] = survivors
+                    best["needs_review"] = True
 
         if persist and account_id is not None:
             meta = {k: best.get(k) for k in ("tweets", "hashtags", "axes", "mechanical",
                                              "note", "char_count", "emotion",
                                              "ungrounded_claims", "stance_conflicts",
-                                             "risk_level", "risk_vectors")}
+                                             "risk_level", "risk_vectors",
+                                             "brand_violations")}
             best["post_id"] = memory.save_post(
                 account_id=account_id, fmt=best["format"], content=best["content"],
                 meta=meta, signal_id=signal.get("id"), article_id=signal.get("article_id"),
