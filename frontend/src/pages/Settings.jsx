@@ -11,7 +11,9 @@ const WATCH_PLACEHOLDERS = {
 };
 
 const BLANK_BRAND = { banned_words: '', word_swaps: '', disclaimers: '',
-  cta_text: '', cta_url: '', website_url: '', notes: '' };
+  cta_text: '', cta_url: '', website_url: '', notes: '',
+  accent_color: '#4da3ff', secondary_color: '', bg_style: 'dark',
+  font_family: 'sans', watermark_text: '' };
 
 export default function Settings({ accounts, refreshAccounts }) {
   const [form, setForm] = useState({ handle: '', niche: '', topics: '', kind: '' });
@@ -43,6 +45,10 @@ export default function Settings({ accounts, refreshAccounts }) {
       disclaimers: (b.disclaimers || []).join('\n'),
       cta_text: b.cta_text || '', cta_url: b.cta_url || '',
       website_url: b.website_url || '', notes: b.notes || '',
+      accent_color: b.accent_color || '#4da3ff',
+      secondary_color: b.secondary_color || '',
+      bg_style: b.bg_style || 'dark', font_family: b.font_family || 'sans',
+      watermark_text: b.watermark_text || '',
     })).catch(() => setBrand(BLANK_BRAND));
   }, [brandFor]);
   const refreshCorpus = () =>
@@ -81,6 +87,10 @@ export default function Settings({ accounts, refreshAccounts }) {
       disclaimers: brand.disclaimers.split('\n').map((x) => x.trim()).filter(Boolean),
       cta_text: brand.cta_text || null, cta_url: brand.cta_url || null,
       website_url: brand.website_url || null, notes: brand.notes || null,
+      accent_color: brand.accent_color || null,
+      secondary_color: brand.secondary_color || null,
+      bg_style: brand.bg_style || null, font_family: brand.font_family || null,
+      watermark_text: brand.watermark_text || null,
     } });
     setMsg('Brand kit saved — every draft now obeys these rules.');
   };
@@ -203,6 +213,31 @@ export default function Settings({ accounts, refreshAccounts }) {
               value={brand.notes}
               onInput={(e) => setBrand({ ...brand, notes: e.target.value })}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-sm placeholder-zinc-600" />
+            <div className="text-sm text-zinc-400 pt-1">🎨 Visual identity (used on every generated graphic):</div>
+            <div className="grid md:grid-cols-4 gap-2 items-center">
+              <label className="flex items-center gap-2 text-sm text-zinc-400">
+                accent
+                <input type="color" value={brand.accent_color}
+                  onInput={(e) => setBrand({ ...brand, accent_color: e.target.value })}
+                  className="h-8 w-12 bg-zinc-800 border border-zinc-700 rounded" />
+              </label>
+              <select value={brand.bg_style}
+                onChange={(e) => setBrand({ ...brand, bg_style: e.target.value })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+                <option value="dark">dark background</option>
+                <option value="light">light background</option>
+                <option value="gradient">gradient background</option>
+              </select>
+              <select value={brand.font_family}
+                onChange={(e) => setBrand({ ...brand, font_family: e.target.value })}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+                <option value="sans">sans (Inter)</option>
+                <option value="serif">serif (Lora)</option>
+                <option value="mono">mono (JetBrains)</option>
+              </select>
+              <Input placeholder="watermark text" value={brand.watermark_text}
+                onInput={(e) => setBrand({ ...brand, watermark_text: e.target.value })} />
+            </div>
             <Btn color="blue" onClick={saveBrand}>Save brand kit</Btn>
           </div>
         )}

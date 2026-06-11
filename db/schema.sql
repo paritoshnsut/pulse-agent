@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS brand_kit (
     cta_url      TEXT,
     website_url  TEXT,
     notes        TEXT,                       -- freeform brand voice / compliance notes
+    accent_color    TEXT,                    -- visual identity (VISUALS.md)
+    secondary_color TEXT,
+    bg_style        TEXT,                    -- dark | light | gradient
+    font_family     TEXT,                    -- sans | serif | mono
+    watermark_text  TEXT,
+    logo_url        TEXT,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );

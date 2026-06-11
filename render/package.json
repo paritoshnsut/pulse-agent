@@ -1,0 +1,17 @@
+{
+  "name": "pulse-render",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Satori-based visual render service: flexbox layouts -> SVG -> PNG, no browser.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.0.0",
+    "@fontsource/jetbrains-mono": "^5.0.0",
+    "@fontsource/lora": "^5.0.0",
+    "@resvg/resvg-js": "^2.6.0",
+    "satori": "^0.12.0"
+  }
+}

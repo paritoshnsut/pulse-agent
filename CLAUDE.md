@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **282 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **290 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -171,7 +171,7 @@ code-switching,** and `influences` distilled from admired writing.
 |---|---|---|
 | X / Twitter | ✅ | manual via `x.com/intent/post` pre-filled compose (no API write) |
 | Telegram | ✅ | draft push + full command cockpit + optional channel auto-publish |
-| Image cards (Pillow) | ✅ | branded, AI-labelled, attached at approval |
+| **Branded visuals (Satori)** | ✅ | template-based PNGs (quote/stat/insight) with brand kit colors/fonts; Pillow card is the fail-safe; see `VISUALS.md` |
 | LinkedIn / Threads / WhatsApp | ⏸ | deferred until selling / party mode |
 
 ---
@@ -235,7 +235,8 @@ for any brand, creator, or business.** Shipped in v1; the rest is the roadmap.
 | Trigger-to-Content (webhooks: GitHub/Shopify/Stripe/calendar) | ⏸ | generalizes the watch layer to business events. Phase 2. |
 | Agency mode + magic-link client approvals | ⏸ | the lucrative multi-seat segment. Phase 3. |
 | Content calendar / campaign planner | ⏸ | cadence + themes + "fill my week". Phase 3. |
-| Visual generation v2 (carousels, branded graphics, Canva/Figma) | ⏸ | the expensive frontier — validate text-first. |
+| **Visual generation V1 (Satori)** | ✅ | branded PNGs on every approval: quote/stat/insight templates, brand colors/fonts/watermark, persistent localhost Node renderer (no browser), Pillow fail-safe. Full plan + phases in `VISUALS.md`. |
+| Visuals V1.5 (carousel, logo embed, preview) + V2 (AI-imagery design agent) | ⏸ | tracked step-by-step in `VISUALS.md` |
 | Social listening (tamed lead-gen — copilot reply, never auto-spam) | ⏸ | needs paid social read; auto-reply-to-strangers deliberately refused. |
 
 ## Party mode (enterprise) — all ⏸ deferred
@@ -294,7 +295,7 @@ watch/      youtube reddit trends twitter(stub)
 image/      cards
 presets.py  onboarding starter packs            sources.py  65-feed catalog
 api/        main.py (+ static fallback)         frontend/  React app
-db/         schema.sql                          tests/     282 tests
+db/         schema.sql                          tests/     290 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
 ```
 

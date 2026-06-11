@@ -192,24 +192,17 @@ def default_photo_transport(method: str, payload: dict, file_path: str) -> dict:
 
 
 def make_card(post: dict, db_path: Optional[str] = None) -> Optional[str]:
-    """Render the branded image card for a post (first tweet for threads).
-    Returns the PNG path, or None when cards are disabled / Pillow is missing /
-    rendering fails — the card is a bonus, never a blocker."""
+    """Render the branded visual for a post via the Satori pipeline
+    (pipeline/visuals.py — template auto-picked, brand kit applied), with the
+    original Pillow card as the built-in fallback. Returns the PNG path, or
+    None when disabled/failed — a visual is a bonus, never a blocker."""
     if not settings.cards_enabled:
         return None
     try:
-        from image.cards import render_card
-    except ImportError:
-        logger.info("Pillow not installed — skipping image card.")
-        return None
-    try:
-        meta = post.get("meta_json") or {}
-        text = (meta.get("tweets") or [None])[0] or \
-            post["content"].split(THREAD_SEP)[0]
-        acct = memory.get_account(post["account_id"], db_path=db_path) or {}
-        return render_card(text, handle=acct.get("handle", ""))
+        from pipeline.visuals import generate_for_post
+        return generate_for_post(post["id"], db_path=db_path)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Card rendering failed: %s", exc)
+        logger.error("Visual rendering failed: %s", exc)
         return None
 
 

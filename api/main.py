@@ -146,6 +146,13 @@ class BrandBody(BaseModel):
     cta_url: Optional[str] = None
     website_url: Optional[str] = None
     notes: Optional[str] = None
+    # visual identity (VISUALS.md)
+    accent_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    bg_style: Optional[str] = None      # dark | light | gradient
+    font_family: Optional[str] = None   # sans | serif | mono
+    watermark_text: Optional[str] = None
+    logo_url: Optional[str] = None
 
 
 class RepurposeBody(BaseModel):
@@ -420,10 +427,15 @@ def approve(post_id: int, user: dict = Depends(require_auth)):
     post = memory.get_post(post_id, db_path=_db())
     result = poster.dispatch_approved(post, db_path=_db())
     card = result.get("card")
+    card_url = None
+    if card:
+        # visuals (Satori) and cards (Pillow fallback) live on different mounts
+        mount = "visuals" if Path(card).parent == Path(settings.visuals_dir) else "cards"
+        card_url = f"/{mount}/{Path(card).name}"
     return {
         "texts": result["texts"],
         "intent_urls": result["intent_urls"],
-        "card_url": f"/cards/{Path(card).name}" if card else None,
+        "card_url": card_url,
         "timing": _safe_timing(post.get("account_id")),
     }
 
@@ -572,6 +584,8 @@ def status(user: dict = Depends(require_auth)):
 # --------------------------------------------------------------------------- #
 Path(settings.cards_dir).mkdir(parents=True, exist_ok=True)
 app.mount("/cards", StaticFiles(directory=settings.cards_dir), name="cards")
+Path(settings.visuals_dir).mkdir(parents=True, exist_ok=True)
+app.mount("/visuals", StaticFiles(directory=settings.visuals_dir), name="visuals")
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if (FRONTEND_DIST / "assets").exists():

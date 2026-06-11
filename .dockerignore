@@ -10,3 +10,5 @@ cards/
 tests/
 frontend/node_modules
 backups/
+render/node_modules
+visuals/

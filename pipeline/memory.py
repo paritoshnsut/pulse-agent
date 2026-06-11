@@ -85,6 +85,12 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     vs_cols = {r["name"] for r in conn.execute("PRAGMA table_info(voice_samples)")}
     if vs_cols and "source" not in vs_cols:
         conn.execute("ALTER TABLE voice_samples ADD COLUMN source TEXT")
+    bk_cols = {r["name"] for r in conn.execute("PRAGMA table_info(brand_kit)")}
+    if bk_cols:
+        for col in ("accent_color", "secondary_color", "bg_style", "font_family",
+                    "watermark_text", "logo_url"):
+            if col not in bk_cols:
+                conn.execute(f"ALTER TABLE brand_kit ADD COLUMN {col} TEXT")
 
 
 def init_db(db_path: Optional[str] = None, schema_path: Optional[str] = None) -> None:
@@ -360,7 +366,8 @@ _BRAND_JSON = ("banned_words", "word_swaps", "disclaimers")
 
 
 def save_brand_kit(account_id: int, kit: dict, db_path: Optional[str] = None) -> None:
-    """Upsert the brand kit for an account. JSON fields stored as text."""
+    """Upsert the brand kit for an account. JSON fields stored as text.
+    Visual identity fields (accent/bg/font/watermark/logo) feed VISUALS.md."""
     now = _now()
     vals = {
         "banned_words": json.dumps(kit.get("banned_words") or []),
@@ -368,19 +375,31 @@ def save_brand_kit(account_id: int, kit: dict, db_path: Optional[str] = None) ->
         "disclaimers": json.dumps(kit.get("disclaimers") or []),
         "cta_text": kit.get("cta_text"), "cta_url": kit.get("cta_url"),
         "website_url": kit.get("website_url"), "notes": kit.get("notes"),
+        "accent_color": kit.get("accent_color"),
+        "secondary_color": kit.get("secondary_color"),
+        "bg_style": kit.get("bg_style"), "font_family": kit.get("font_family"),
+        "watermark_text": kit.get("watermark_text"), "logo_url": kit.get("logo_url"),
     }
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT INTO brand_kit
                (account_id, banned_words, word_swaps, disclaimers, cta_text,
-                cta_url, website_url, notes, created_at, updated_at)
+                cta_url, website_url, notes, accent_color, secondary_color,
+                bg_style, font_family, watermark_text, logo_url,
+                created_at, updated_at)
                VALUES (:aid, :banned_words, :word_swaps, :disclaimers, :cta_text,
-                       :cta_url, :website_url, :notes, :now, :now)
+                       :cta_url, :website_url, :notes, :accent_color,
+                       :secondary_color, :bg_style, :font_family,
+                       :watermark_text, :logo_url, :now, :now)
                ON CONFLICT(account_id) DO UPDATE SET
                    banned_words=excluded.banned_words, word_swaps=excluded.word_swaps,
                    disclaimers=excluded.disclaimers, cta_text=excluded.cta_text,
                    cta_url=excluded.cta_url, website_url=excluded.website_url,
-                   notes=excluded.notes, updated_at=excluded.updated_at""",
+                   notes=excluded.notes, accent_color=excluded.accent_color,
+                   secondary_color=excluded.secondary_color,
+                   bg_style=excluded.bg_style, font_family=excluded.font_family,
+                   watermark_text=excluded.watermark_text,
+                   logo_url=excluded.logo_url, updated_at=excluded.updated_at""",
             {"aid": account_id, "now": now, **vals},
         )
 

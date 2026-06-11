@@ -9,3 +9,5 @@ frontend/dist/
 .pytest_cache/
 .DS_Store
 backups/
+visuals/
+render/node_modules/

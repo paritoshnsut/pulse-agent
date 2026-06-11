@@ -194,6 +194,14 @@ class Settings:
     # inspiration training set, so one columnist can't warp `influences`.
     corpus_source_cap_fraction: float = float(os.getenv("CORPUS_SOURCE_CAP_FRACTION", "0.5"))
 
+    # --- Visuals: Satori-rendered branded graphics (see VISUALS.md).
+    # The Node render service runs persistently on localhost; Python spawns
+    # and health-checks it. Pillow stays the fail-safe fallback. ---
+    visuals_enabled: bool = os.getenv("VISUALS_ENABLED", "1").lower() not in ("0", "false", "")
+    visuals_port: int = int(os.getenv("VISUALS_PORT", "8787"))
+    visuals_dir: str = os.getenv("VISUALS_DIR", str(PROJECT_ROOT / "visuals"))
+    render_dir: str = os.getenv("RENDER_DIR", str(PROJECT_ROOT / "render"))
+
     # --- Content Squeezer (repurpose one input into a multi-format pack).
     # Each tuple is (format, count). Text-only formats — multi-platform APIs
     # and visual generation are a later phase. ---
