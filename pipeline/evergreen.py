@@ -104,12 +104,14 @@ class EvergreenGenerator:
         scorer = (PersonaConsistencyScorer(client=self._client, model=self.model)
                   if self._client else PersonaConsistencyScorer())
         from pipeline.grounding import GroundingChecker
-        grounding = (GroundingChecker(client=self._client, model=self.model)
-                     if settings.grounding_enabled else None)
+        from pipeline.integrity import StanceArcGuard
+        c, m = self._client, self.model
+        grounding = GroundingChecker(client=c, model=m) if settings.grounding_enabled else None
+        arc_guard = StanceArcGuard(client=c, model=m) if settings.arc_guard_enabled else None
         draft = gen.generate_checked(
             signal, genome, fmt="evergreen", scorer=scorer,
             account_id=account["id"], persist=True, db_path=self.db_path,
-            context=ctx, grounding=grounding,
+            context=ctx, grounding=grounding, arc_guard=arc_guard,
         )
         if draft.get("post_id"):
             memory.update_post_meta(draft["post_id"],

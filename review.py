@@ -65,6 +65,9 @@ def main() -> None:
     ap.add_argument("--account", help="filter by account handle")
     ap.add_argument("--approve", type=int, metavar="ID")
     ap.add_argument("--reject", type=int, metavar="ID")
+    ap.add_argument("--reason", help="optional reason with --reject (teaches the voice)")
+    ap.add_argument("--redo", type=int, metavar="ID", help="rewrite a draft")
+    ap.add_argument("--steer", help="instruction with --redo, e.g. 'make it sharper'")
     ap.add_argument("--outbox", action="store_true", help="approved, not yet posted")
     ap.add_argument("--posted", type=int, metavar="ID", help="mark as posted by you")
     ap.add_argument("--url", help="live URL of the posted tweet (with --posted)")
@@ -82,7 +85,22 @@ def main() -> None:
         return
     if args.reject:
         memory.set_post_status(args.reject, "rejected")
+        if args.reason:
+            from pipeline.feedback import record_reject
+            record_reject(args.reject, args.reason)
         print(f"Draft #{args.reject} rejected — the learning loop will use this.")
+        return
+
+    if args.redo:
+        if not args.steer:
+            print("Add --steer 'how to change it', e.g. --redo 12 --steer 'more savage'")
+            return
+        from pipeline.feedback import regenerate_with_steer
+        r = regenerate_with_steer(args.redo, args.steer)
+        if not r.get("ok"):
+            print(f"Couldn't redo #{args.redo}: {r.get('error')}")
+            return
+        print(f"Draft #{args.redo} redone:\n  {r['content']}")
         return
     if args.posted:
         memory.mark_posted(args.posted, url=args.url)

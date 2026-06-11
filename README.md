@@ -76,7 +76,10 @@ automated (optional), because Telegram supports bot posting natively.
 | **Voice corpus** (persistent, daily-fed training set) | `style/corpus.py` + `voice_samples` | ✅ **new** — engagement-weighted selection |
 | **Genome A v2** (cadence/punctuation/openers + sentiment depth) | `style/dna.py` | ✅ **new** |
 | **Corpus suggestions** (from polled feeds, human-gated) | `style/corpus.py` + web Settings | ✅ **new** — never auto-added |
-| **Grounding shield** (claims vs source, pre-review) | `pipeline/grounding.py` | ✅ **new** — flags, never censors |
+| **Stance arc guard** (flags reversals of your past positions) | `pipeline/integrity.py` | ✅ **new** — free at cold start |
+| **Backlash simulator** (red-teams FIRE drafts) | `pipeline/integrity.py` | ✅ **new** — high-stakes only |
+| **Redo-with-steer + reject reasons** (richer feedback) | `pipeline/feedback.py` | ✅ **new** — feeds the voice |
+| Grounding shield (claims vs source, pre-review) | `pipeline/grounding.py` | ✅ — flags, never censors |
 | **Cost ledger + daily budget guard** | `pipeline/llm.py` + `claude_logs` | ✅ **new** — hard stop + one alert/day |
 | **Corpus flywheel** (posted+measured drafts train the voice) | `style/corpus.py` | ✅ **new** |
 | **Daily backups** (VACUUM INTO, rotated) | `memory.backup_db` + scheduler | ✅ **new** |
@@ -377,6 +380,34 @@ its own audience-validated output; re-logging /perf updates the numbers.
 `BACKUP_KEEP` (7). **Staleness**: drafts older than `DRAFT_STALE_HOURS` (24)
 warn "the moment may have passed" in Telegram and show a red age chip on the
 web review card.
+
+**Stance arc guard** (`pipeline/integrity.py`): before review, a draft is
+checked against your `stance_history` on the topic — a genuine *reversal* of a
+past position is flagged ("↩️ contradicts your past stance — own the change on
+purpose") and forces review. A flip-flop is the cardinal political sin; this
+is the protection no competitor scoring "the news" generically can offer,
+because they don't know your history. Free at cold start — only spends a call
+when you actually have prior stances on the topic.
+
+**Backlash simulator** (`pipeline/integrity.py`): on FIRE and inherently-spicy
+drafts (callbacks, counter-narratives), one red-team call lists concrete ways
+the post could be screenshotted, misread, or turned against you, with a risk
+level. High risk forces review. Targeted to high-stakes drafts so spend stays
+where it matters.
+
+**Redo-with-steer + reject reasons** (`pipeline/feedback.py`): approve/reject
+is a thumbs up/down; a steer is a *direction*. `/redo 12 make it more savage`
+(Telegram), a steer box on the web card, or `review.py --redo 12 --steer
+'sharper'` rewrites the draft in place — same facts, same voice, the
+instruction applied — and re-enters the review lane. Every steer and every
+`/reject 12 too preachy` reason is recorded and fed into the learning loop's
+next pass, so a recurring "more savage" becomes a standing preference. The
+biggest day-to-day quality lever: every rejection becomes a lesson instead of
+a dead end.
+
+> Ideas we evaluated and deliberately parked (knowledge graph, live-stream
+> interceptor, opponent mirror, …) live in [DEFERRED.md](DEFERRED.md) with the
+> reason and the trigger that would make each worth building.
 
 ## The intelligence layer (CLAUDE.md's 12, scored honestly)
 

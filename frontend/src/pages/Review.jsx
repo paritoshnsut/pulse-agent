@@ -11,17 +11,32 @@ function DraftCard({ p, refresh }) {
   const [perf, setPerf] = useState({ likes: '', retweets: '', replies: '' });
   const [phase, setPhase] = useState(p.status);
   const [msg, setMsg] = useState('');
-  const hooks = (p.meta_json || {}).alt_hooks || [];
-  const ungrounded = (p.meta_json || {}).ungrounded_claims || [];
+  const meta = p.meta_json || {};
+  const hooks = meta.alt_hooks || [];
+  const ungrounded = meta.ungrounded_claims || [];
+  const conflicts = meta.stance_conflicts || [];
+  const riskVectors = (meta.risk_level === 'high' || meta.risk_level === 'medium')
+    ? (meta.risk_vectors || []) : [];
   const ageH = Math.round((Date.now() - new Date(p.created_at)) / 36e5);
+  const [steer, setSteer] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const approve = async () => {
     setPkg(await api(`/api/drafts/${p.id}/approve`, { method: 'POST' }));
     setPhase('approved');
   };
   const rejectIt = async () => {
-    await api(`/api/drafts/${p.id}/reject`, { method: 'POST' });
+    await api(`/api/drafts/${p.id}/reject`,
+      { method: 'POST', body: { reason: rejectReason || null } });
     refresh();
+  };
+  const redo = async () => {
+    if (!steer.trim()) return;
+    setBusy(true); setMsg('');
+    try { await api(`/api/drafts/${p.id}/redo`, { method: 'POST', body: { instruction: steer } });
+          setSteer(''); refresh(); }
+    catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   const posted = async () => {
     const r = await api(`/api/drafts/${p.id}/posted`,
@@ -65,6 +80,28 @@ function DraftCard({ p, refresh }) {
           ))}
         </div>
       )}
+      {conflicts.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-700 bg-amber-950/40 p-3 text-sm">
+          <div className="font-medium text-amber-300">
+            ↩️ Contradicts your past stance — own the change on purpose:
+          </div>
+          {conflicts.map((c, i) => (
+            <div key={i} className="text-amber-200/90 mt-1">
+              • was: {c.past || '?'} → now: {c.now || '?'}
+            </div>
+          ))}
+        </div>
+      )}
+      {riskVectors.length > 0 && (
+        <div className="mt-3 rounded-lg border border-orange-800 bg-orange-950/40 p-3 text-sm">
+          <div className="font-medium text-orange-300">
+            ⚠️ Backlash risk ({meta.risk_level}) — could be turned against you:
+          </div>
+          {riskVectors.map((v, i) => (
+            <div key={i} className="text-orange-200/90 mt-1">• {v}</div>
+          ))}
+        </div>
+      )}
 
       {hooks.length > 0 && (
         <div className="mt-3 text-sm text-zinc-400">
@@ -79,9 +116,21 @@ function DraftCard({ p, refresh }) {
       )}
 
       {phase === 'draft' && (
-        <div className="flex gap-2 mt-4">
-          <Btn color="green" onClick={approve}>✅ Approve</Btn>
-          <Btn color="red" onClick={rejectIt}>❌ Reject</Btn>
+        <div className="mt-4 space-y-2">
+          <div className="flex gap-2 items-center">
+            <Input placeholder="steer it: 'more savage', 'lead with the number', 'too soft'"
+                   value={steer} onInput={(e) => setSteer(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && redo()} />
+            <Btn color="blue" disabled={!steer.trim() || busy} onClick={redo}>
+              {busy ? '…' : '🔁 Redo'}
+            </Btn>
+          </div>
+          <div className="flex gap-2 items-center">
+            <Btn color="green" onClick={approve}>✅ Approve</Btn>
+            <Btn color="red" onClick={rejectIt}>❌ Reject</Btn>
+            <Input placeholder="reject reason (optional — teaches the voice)"
+                   value={rejectReason} onInput={(e) => setRejectReason(e.target.value)} />
+          </div>
         </div>
       )}
 

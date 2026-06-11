@@ -233,12 +233,18 @@ class ReviewLearner:
         return self._client
 
     # -------------------------------------------------------------- judging
-    def _build_user_prompt(self, pos: list[dict], neg: list[dict], stats: dict) -> str:
+    def _build_user_prompt(self, pos: list[dict], neg: list[dict], stats: dict,
+                           steers: Optional[list[str]] = None) -> str:
         def _fmt(posts: list[dict]) -> str:
             return "\n".join(
                 f"- [{p['format']}] {p['content']}" for p in posts[:10]
             )
 
+        steer_block = ""
+        if steers:
+            steer_block = ("\nEXPLICIT STEERS THE WRITER GAVE RECENTLY (redo "
+                           "instructions + rejection reasons — weight these "
+                           f"heavily): {steers[:12]}\n")
         return (
             f"MEASURED STATS (ground truth):\n"
             f"  approval rate: {stats['approval_rate']}\n"
@@ -248,7 +254,8 @@ class ReviewLearner:
             f"  question rate approved/rejected: "
             f"{stats['question_rate_approved']} / {stats['question_rate_rejected']}\n\n"
             f"APPROVED DRAFTS ({len(pos)} shown up to 10):\n{_fmt(pos)}\n\n"
-            f"REJECTED DRAFTS ({len(neg)} shown up to 10):\n{_fmt(neg)}\n\n"
+            f"REJECTED DRAFTS ({len(neg)} shown up to 10):\n{_fmt(neg)}\n"
+            f"{steer_block}\n"
             "What separates the piles? Return JSON with exactly these keys:\n"
             '  "avoid": array of 0-4 short rules describing what the rejected '
             'drafts do that the approved ones don\'t (e.g. "vague outrage with '
@@ -260,14 +267,14 @@ class ReviewLearner:
             "NOT invent patterns."
         )
 
-    def judge(self, pos: list[dict], neg: list[dict], stats: dict) -> dict:
+    def judge(self, pos: list[dict], neg: list[dict], stats: dict,
+              steers: Optional[list[str]] = None) -> dict:
         msg = tracked_create(self.client, "learning",
-            
             model=self.model,
             max_tokens=500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user",
-                       "content": self._build_user_prompt(pos, neg, stats)}],
+                       "content": self._build_user_prompt(pos, neg, stats, steers)}],
         )
         text = "".join(getattr(b, "text", "") for b in msg.content)
         try:
@@ -316,8 +323,9 @@ class ReviewLearner:
         pos = [p for p in reviewed if p["status"] in POSITIVE]
         neg = [p for p in reviewed if p["status"] in NEGATIVE]
         judged: dict = {}
+        steers = memory.get_recent_feedback_notes(account_id, db_path=db_path)
         if len(pos) >= settings.learn_min_side and len(neg) >= settings.learn_min_side:
-            judged = self.judge(pos, neg, stats)
+            judged = self.judge(pos, neg, stats, steers=steers)
         else:
             logger.info("Account %s: %d approved / %d rejected — stats-only "
                         "update (need %d per side for the contrast).",

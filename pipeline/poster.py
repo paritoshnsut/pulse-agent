@@ -94,12 +94,22 @@ def _age_hours(post: dict) -> Optional[float]:
 
 
 def _warning_lines(post: dict) -> list[str]:
-    """Grounding + staleness warnings, shared by the alert and the package."""
+    """Grounding + arc + risk + staleness warnings, shared everywhere."""
     lines = []
-    claims = (post.get("meta_json") or {}).get("ungrounded_claims") or []
+    meta = post.get("meta_json") or {}
+    claims = meta.get("ungrounded_claims") or []
     if claims:
         lines.append("🚨 VERIFY BEFORE POSTING — claims not found in the source:")
         lines += [f"  • {c}" for c in claims[:5]]
+    conflicts = meta.get("stance_conflicts") or []
+    if conflicts:
+        lines.append("↩️ CONTRADICTS YOUR PAST STANCE — own the change on purpose:")
+        lines += [f"  • was: {c.get('past', '?')} → now: {c.get('now', '?')}"
+                  for c in conflicts[:3]]
+    if meta.get("risk_level") in ("high", "medium") and (meta.get("risk_vectors") or []):
+        icon = "⚠️" if meta["risk_level"] == "high" else "🔸"
+        lines.append(f"{icon} backlash risk ({meta['risk_level']}) — could be turned against you:")
+        lines += [f"  • {v}" for v in meta["risk_vectors"][:3]]
     age = _age_hours(post)
     if age is not None and age >= settings.draft_stale_hours:
         lines.append(f"⏳ this draft is {age:.0f}h old — check the moment "

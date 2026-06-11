@@ -39,6 +39,7 @@ HELP = (
     "/approve ID — approve + get the post-it-yourself link\n"
     "/reject ID — reject (the agent learns from this)\n"
     "/outbox — approved, not yet posted\n"
+    "/redo ID instruction — rewrite a draft ('/redo 12 make it more savage')\n"
     "/posted ID [url] — you posted it on X\n"
     "/perf ID likes retweets replies [views] — log engagement\n"
     "/evergreen [handle] [topic] — draft a no-news-peg opinion post"
@@ -134,7 +135,29 @@ class TelegramCommander:
                 if not self._get(pid):
                     return f"No draft #{pid}."
                 memory.set_post_status(pid, "rejected", db_path=self.db_path)
-                return f"❌ #{pid} rejected — the learning loop will use this."
+                reason = " ".join(args[1:]).strip()
+                if reason:
+                    from pipeline.feedback import record_reject
+                    record_reject(pid, reason, db_path=self.db_path)
+                return (f"❌ #{pid} rejected"
+                        + (" — reason noted, the voice will learn from it."
+                           if reason else " — tip: add a reason ('/reject "
+                           f"{pid} too preachy') to teach the voice."))
+
+            if cmd == "redo":
+                pid = int(args[0])
+                if not self._get(pid):
+                    return f"No draft #{pid}."
+                instruction = " ".join(args[1:]).strip()
+                if not instruction:
+                    return f"How should I change it? e.g. /redo {pid} make it sharper"
+                from pipeline.feedback import regenerate_with_steer
+                r = regenerate_with_steer(pid, instruction, db_path=self.db_path)
+                if not r.get("ok"):
+                    return f"Couldn't redo #{pid}: {r.get('error')}"
+                return ("🔁 redone:\n"
+                        + poster.format_draft_alert(
+                            memory.get_post(pid, db_path=self.db_path)))
 
             if cmd == "posted":
                 pid = int(args[0])

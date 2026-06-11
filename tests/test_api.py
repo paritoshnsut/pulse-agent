@@ -147,10 +147,28 @@ def test_full_review_lifecycle(client, temp_db, monkeypatch):
 
 
 def test_reject_and_missing_draft(client, temp_db):
-    _, pid = _seed_draft(temp_db)
-    assert client.post(f"/api/drafts/{pid}/reject").json()["ok"] is True
+    acct, pid = _seed_draft(temp_db)
+    r = client.post(f"/api/drafts/{pid}/reject", json={"reason": "too preachy"})
+    assert r.json()["ok"] is True
     assert memory.get_post(pid, db_path=temp_db)["status"] == "rejected"
+    assert "too preachy" in memory.get_recent_feedback_notes(acct, db_path=temp_db)
     assert client.post("/api/drafts/999/approve").status_code == 404
+
+
+def test_redo_endpoint(client, temp_db, monkeypatch):
+    import pipeline.feedback as fb
+    acct, pid = _seed_draft(temp_db)
+    monkeypatch.setattr(fb, "regenerate_with_steer",
+                        lambda post_id, instruction, db_path=None: (
+                            memory.update_post_content(post_id, "SHARPER VERSION", {},
+                                                       db_path=db_path)
+                            or {"ok": True, "content": "SHARPER VERSION"}))
+    r = client.post(f"/api/drafts/{pid}/redo", json={"instruction": "sharper"})
+    assert r.status_code == 200 and r.json()["content"] == "SHARPER VERSION"
+    # failure path -> 400
+    monkeypatch.setattr(fb, "regenerate_with_steer",
+                        lambda post_id, instruction, db_path=None: {"ok": False, "error": "no voice"})
+    assert client.post(f"/api/drafts/{pid}/redo", json={"instruction": "x"}).status_code == 400
 
 
 # ---------------------------------------------------- ideas/briefing/analytics

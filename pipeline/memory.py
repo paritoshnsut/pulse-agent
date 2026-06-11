@@ -742,6 +742,31 @@ def get_reviewed_posts(account_id: int, db_path: Optional[str] = None) -> list[d
         return out
 
 
+def record_feedback(account_id: int, post_id: Optional[int], kind: str, note: str,
+                    db_path: Optional[str] = None) -> int:
+    """Store a freeform steer/reason. The richer-than-binary learning signal."""
+    with get_conn(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO draft_feedback (account_id, post_id, kind, note, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (account_id, post_id, kind, note.strip(), _now()),
+        )
+        return cur.lastrowid
+
+
+def get_recent_feedback_notes(account_id: int, limit: int = 15,
+                              db_path: Optional[str] = None) -> list[str]:
+    """Recent freeform steers/reasons — fed into the learning loop so a
+    recurring 'more savage' becomes a standing preference."""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT note FROM draft_feedback WHERE account_id = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (account_id, limit),
+        ).fetchall()
+        return [r["note"] for r in rows]
+
+
 def update_post_meta(post_id: int, updates: dict, db_path: Optional[str] = None) -> None:
     """Merge keys into a post's meta_json (e.g. alt_hooks added after drafting)."""
     with get_conn(db_path) as conn:
@@ -752,6 +777,18 @@ def update_post_meta(post_id: int, updates: dict, db_path: Optional[str] = None)
         meta.update(updates)
         conn.execute("UPDATE posts SET meta_json = ?, updated_at = ? WHERE id = ?",
                      (json.dumps(meta), _now(), post_id))
+
+
+def update_post_content(post_id: int, content: str, meta: dict,
+                        needs_review: bool = True, db_path: Optional[str] = None) -> None:
+    """Replace a draft's content + meta in place (the redo-with-steer path).
+    Resets to 'draft' so a regenerated post re-enters the review lane."""
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """UPDATE posts SET content = ?, meta_json = ?, needs_review = ?,
+               status = 'draft', updated_at = ? WHERE id = ?""",
+            (content, json.dumps(meta or {}), int(needs_review), _now(), post_id),
+        )
 
 
 def set_post_status(post_id: int, status: str, db_path: Optional[str] = None) -> None:

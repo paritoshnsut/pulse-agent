@@ -171,6 +171,20 @@ CREATE TABLE IF NOT EXISTS engagement (
 );
 CREATE INDEX IF NOT EXISTS idx_engagement_post ON engagement(post_id);
 
+-- Freeform + graded feedback on drafts: the richer signal beyond approve/
+-- reject. kind='redo' carries a steer ("more savage") that regenerated the
+-- draft; kind='reject_note' a reason. Mined by the learning loop so recurring
+-- steers become standing preferences.
+CREATE TABLE IF NOT EXISTS draft_feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    post_id     INTEGER REFERENCES posts(id),
+    kind        TEXT NOT NULL,              -- redo | reject_note
+    note        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_draft_feedback_acct ON draft_feedback(account_id);
+
 -- Every Claude call: which module spent what. The audit trail + the daily
 -- budget guard's ledger (pipeline/llm.py).
 CREATE TABLE IF NOT EXISTS claude_logs (

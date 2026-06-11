@@ -403,6 +403,44 @@ class ContentGenerator:
             logger.error("alt_hooks failed: %s", exc)
             return []
 
+    def rewrite(self, draft_text: str, instruction: str, genome: dict,
+                is_thread: bool = False) -> dict:
+        """Regenerate a draft following a human steer ("make it more savage",
+        "too soft", "drop the hashtag"). Style/tone edit on the existing
+        draft — same facts, same voice, the instruction applied. Works for
+        every format. Returns a draft-shaped dict; empty on failure."""
+        thread_keys = ('  "tweets": array of the rewritten tweet strings,\n'
+                       if is_thread else '  "text": the rewritten post,\n')
+        prompt = (
+            f"CURRENT DRAFT:\n\"\"\"\n{draft_text}\n\"\"\"\n\n"
+            f"THE WRITER'S INSTRUCTION: {instruction}\n\n"
+            f"VOICE PROFILE (still match it exactly):\n{_style_rules(genome)}\n"
+            "Rewrite the draft to satisfy the instruction. Keep the same facts "
+            "and the same voice — change only what the instruction asks for. "
+            "Do not fabricate new facts. Return JSON with:\n"
+            + thread_keys +
+            '  "hashtags": array of hashtags without the # sign,\n'
+            '  "emotion": dominant emotion (outrage|curiosity|pride|humour|'
+            'surprise|validation|neutral)'
+        )
+        raw = self._call(prompt, max_tokens=900 if is_thread else 400)
+        hashtags = raw.get("hashtags") or []
+        emotion = (raw.get("emotion") or "").strip().lower()
+        if is_thread:
+            tweets = [self.enforce_style(t, genome)
+                      for t in (raw.get("tweets") or []) if t.strip()]
+            tweets = [self._truncate(t)[0] for t in tweets]
+            content = "\n\n———\n\n".join(tweets)
+            return {"format": "thread", "tweets": tweets, "content": content,
+                    "hashtags": hashtags, "emotion": emotion,
+                    "empty": len(tweets) == 0, "char_count": len(content)}
+        text = self.enforce_style(raw.get("text") or "", genome)
+        if text:
+            text = self._attach_hashtags(text, hashtags, genome)
+            text, _ = self._truncate(text)
+        return {"text": text, "content": text, "hashtags": hashtags,
+                "emotion": emotion, "empty": not text, "char_count": len(text)}
+
     def generate_checked(
         self,
         signal: dict,
@@ -416,16 +454,20 @@ class ContentGenerator:
         db_path: Optional[str] = None,
         context: Optional[str] = None,
         grounding: Any = None,
+        arc_guard: Any = None,
+        risk: Any = None,
     ) -> dict:
         """
         Generate -> enforce style -> score against Genome A -> regenerate with
-        feedback if below the gate (rule #9) -> grounding audit. Returns the
-        best draft with its score and a needs_review flag. Optionally persists.
+        feedback if below the gate (rule #9) -> grounding + arc + risk audits.
+        Returns the best draft with its score and a needs_review flag.
 
         scorer: a PersonaConsistencyScorer (or None to skip scoring entirely).
         context: rendered memory block from pipeline/context.py (optional).
-        grounding: a GroundingChecker — flags claims unsupported by the
-        signal+context and force-sets needs_review when any are found.
+        grounding: GroundingChecker — flags claims unsupported by the source.
+        arc_guard: StanceArcGuard — flags reversals of your past stances.
+        risk: RiskSimulator — red-teams the draft for backlash vectors.
+        Any flagged warning forces needs_review; none of them block.
         """
         best: dict = {}
         feedback = ""
@@ -459,20 +501,37 @@ class ContentGenerator:
         best.setdefault("needs_review", best.get("persona_score") is None
                         or best.get("persona_score", 0) < gate)
 
-        # grounding audit: claims the source material doesn't support get
-        # spotlighted for the human and force the review flag
-        if grounding is not None and not best["empty"]:
-            from pipeline.grounding import build_source_block
-            result = grounding.check(best["content"],
+        # ---- pre-review audits: each flags for the human, none block ----
+        if not best["empty"]:
+            # grounding: claims unsupported by the source material
+            if grounding is not None:
+                from pipeline.grounding import build_source_block
+                gr = grounding.check(best["content"],
                                      build_source_block(signal, context))
-            best["ungrounded_claims"] = result["ungrounded_claims"]
-            if result["ungrounded_claims"]:
-                best["needs_review"] = True
+                best["ungrounded_claims"] = gr["ungrounded_claims"]
+                if gr["ungrounded_claims"]:
+                    best["needs_review"] = True
+            # arc guard: reversals of your established positions
+            if arc_guard is not None and account_id is not None:
+                ag = arc_guard.check(best["content"], account_id,
+                                     signal.get("topic"), signal.get("title"),
+                                     db_path=db_path)
+                best["stance_conflicts"] = ag["conflicts"]
+                if ag["conflicts"]:
+                    best["needs_review"] = True
+            # risk: backlash vectors on high-stakes drafts
+            if risk is not None:
+                rk = risk.assess(best["content"], signal)
+                best["risk_level"] = rk["risk_level"]
+                best["risk_vectors"] = rk["vectors"]
+                if rk["risk_level"] == "high":
+                    best["needs_review"] = True
 
         if persist and account_id is not None:
             meta = {k: best.get(k) for k in ("tweets", "hashtags", "axes", "mechanical",
                                              "note", "char_count", "emotion",
-                                             "ungrounded_claims")}
+                                             "ungrounded_claims", "stance_conflicts",
+                                             "risk_level", "risk_vectors")}
             best["post_id"] = memory.save_post(
                 account_id=account_id, fmt=best["format"], content=best["content"],
                 meta=meta, signal_id=signal.get("id"), article_id=signal.get("article_id"),

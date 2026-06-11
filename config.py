@@ -162,6 +162,16 @@ class Settings:
     # draft is supported by the source material the model was given ---
     grounding_enabled: bool = os.getenv("GROUNDING_ENABLED", "1").lower() not in ("0", "false", "")
 
+    # --- Stance arc guard: flag drafts that contradict your established
+    # positions (a flip-flop is the cardinal political sin). Free at cold start
+    # — only spends a call when you HAVE past stances on the topic. ---
+    arc_guard_enabled: bool = os.getenv("ARC_GUARD_ENABLED", "1").lower() not in ("0", "false", "")
+
+    # --- Backlash simulator: on high-stakes drafts, a "how could this be
+    # screenshotted / misread / turned against you" pass. FIRE + inherently
+    # spicy formats only, to keep the spend targeted. ---
+    risk_check_enabled: bool = os.getenv("RISK_CHECK_ENABLED", "1").lower() not in ("0", "false", "")
+
     # --- Draft staleness: warn when a draft has been waiting this long ---
     draft_stale_hours: int = int(os.getenv("DRAFT_STALE_HOURS", "24"))
 

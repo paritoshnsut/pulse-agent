@@ -151,6 +151,14 @@ class PostedBody(BaseModel):
     url: Optional[str] = None
 
 
+class RedoBody(BaseModel):
+    instruction: str
+
+
+class RejectBody(BaseModel):
+    reason: Optional[str] = None
+
+
 class PerfBody(BaseModel):
     likes: int = 0
     retweets: int = 0
@@ -366,10 +374,24 @@ def _safe_timing(account_id: Optional[int]) -> Optional[str]:
 
 
 @app.post("/api/drafts/{post_id}/reject")
-def reject(post_id: int, user: dict = Depends(require_auth)):
+def reject(post_id: int, body: RejectBody = RejectBody(),
+           user: dict = Depends(require_auth)):
     _own_post(post_id, user)
     memory.set_post_status(post_id, "rejected", db_path=_db())
+    if body.reason and body.reason.strip():
+        from pipeline.feedback import record_reject
+        record_reject(post_id, body.reason, db_path=_db())
     return {"ok": True}
+
+
+@app.post("/api/drafts/{post_id}/redo")
+def redo(post_id: int, body: RedoBody, user: dict = Depends(require_auth)):
+    _own_post(post_id, user)
+    from pipeline.feedback import regenerate_with_steer
+    r = regenerate_with_steer(post_id, body.instruction, db_path=_db())
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("error"))
+    return memory.get_post(post_id, db_path=_db())
 
 
 @app.post("/api/drafts/{post_id}/posted")

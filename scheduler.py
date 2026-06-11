@@ -178,7 +178,10 @@ def job_process():
     notifier = poster.TelegramNotifier()
     retriever = ContextRetriever()
     from pipeline.grounding import GroundingChecker
+    from pipeline.integrity import StanceArcGuard, RiskSimulator
     grounding = GroundingChecker() if settings.grounding_enabled else None
+    arc_guard = StanceArcGuard() if settings.arc_guard_enabled else None
+    risk = RiskSimulator() if settings.risk_check_enabled else None
 
     for acct in accounts:
         tally = agent.run(acct, limit=settings.process_batch, per_account=True)
@@ -220,9 +223,12 @@ def job_process():
                 if excerpt:
                     fmt = "video_reaction"
                     ctx = f"{ctx}\n{excerpt}" if ctx else excerpt
-            draft = gen.generate_checked(s, genome, fmt=fmt, scorer=scorer,
-                                         account_id=acct["id"], persist=True,
-                                         context=ctx, grounding=grounding)
+            # red-team backlash only on FIRE (high stakes); arc guard always
+            draft = gen.generate_checked(
+                s, genome, fmt=fmt, scorer=scorer, account_id=acct["id"],
+                persist=True, context=ctx, grounding=grounding,
+                arc_guard=arc_guard,
+                risk=risk if s.get("tier") == "FIRE" else None)
             drafted += 1
             flag = " NEEDS REVIEW" if draft["needs_review"] else ""
             score = f"{draft['persona_score']:.0f}" if draft["persona_score"] is not None else "-"
