@@ -151,6 +151,11 @@ class Settings:
     def allowed_email_set(self) -> set:
         return {e.strip().lower() for e in self.allowed_emails.split(",") if e.strip()}
 
+    # --- Voice corpus: training-set caps + suggestion throttle ---
+    corpus_max_own: int = int(os.getenv("CORPUS_MAX_OWN", "300"))
+    corpus_max_inspiration: int = int(os.getenv("CORPUS_MAX_INSPIRATION", "10"))
+    corpus_suggest_max: int = int(os.getenv("CORPUS_SUGGEST_MAX", "5"))
+
     # --- Audience fatigue detector: don't draft the Nth take on one topic ---
     fatigue_window_hours: int = int(os.getenv("FATIGUE_WINDOW_HOURS", "72"))
     fatigue_max_posts: int = int(os.getenv("FATIGUE_MAX_POSTS", "3"))

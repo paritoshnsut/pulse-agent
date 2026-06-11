@@ -73,6 +73,9 @@ automated (optional), because Telegram supports bot posting natively.
 | **Counter-narrative detector** (the angle nobody is taking) | `pipeline/counter.py` | ✅ **new** — FIRE + heavy coverage only |
 | **Emotion calibration** (learns which emotions land for you) | generator + `style/learning.py` | ✅ **new** |
 | **Hook variants on FIRE drafts** (you pick the opener) | `pipeline/generator.py` | ✅ **new** — copilot A/B |
+| **Voice corpus** (persistent, daily-fed training set) | `style/corpus.py` + `voice_samples` | ✅ **new** — engagement-weighted selection |
+| **Genome A v2** (cadence/punctuation/openers + sentiment depth) | `style/dna.py` | ✅ **new** |
+| **Corpus suggestions** (from polled feeds, human-gated) | `style/corpus.py` + web Settings | ✅ **new** — never auto-added |
 | Web app — React + Vite + Tailwind | `frontend/` + `api/main.py` | ✅ — FastAPI serves the built app |
 | **Supabase auth** (per-user personas, email allowlist) | `api/main.py` | ✅ **new** — JWTs verified locally |
 | Single-container deployment | `Dockerfile` (multi-stage) + `docker-compose.yml` | ✅ — one service runs everything |
@@ -257,6 +260,40 @@ factors with real signal.
 as your approve/reject history accumulates (Bayesian shrinkage — one approval is
 not a 10). Stale articles (older than `STALE_AFTER_MIN`, default 3h) are skipped
 at scoring so the first run doesn't burn calls on old news.
+
+## The voice corpus (training is no longer one-shot)
+
+Every writing sample lives forever in `voice_samples`; feed it daily and hit
+**Retrain voice from corpus** (web Settings, or `python -m style.corpus
+--account me --retrain`). Two kinds, deliberately separated:
+
+* **own** — posts you wrote, one per line. These define the voice: every
+  measured statistic comes from these only. Optionally end a line with
+  `| likes retweets replies` — when the corpus outgrows the training cap
+  (`CORPUS_MAX_OWN`, 300), samples with measured engagement are kept first,
+  best performers ranked top, so your proven winners never age out of the
+  training set. The rest fills with the most recent.
+* **inspiration** — editorials/threads/articles you admire, each stored as one
+  whole piece. Claude distills them into `genome_a["influences"]`
+  (admired patterns + themes) as directional pull — an admired 1200-word
+  editorial never contaminates the arithmetic of your 180-char tweet voice.
+
+**Genome A v2** now captures far more than the CLAUDE.md sketch. Measured
+(deterministic, fingerprint-grade): words/sentence, short-fragment rate,
+em-dash/ellipsis/exclamation/quote rates, opener habits (number / question /
+conjunction / lowercase starts), share of posts with data. Judged (deep
+sentiment analysis): emotional palette (ranked), sentiment baseline,
+rhetorical devices actually used, argument structure (open → develop → land),
+register + code-switching. All of it renders into the generation prompt and
+the persona gate.
+
+**Corpus suggestions, human-gated:** the watchers already pull editorials and
+articles all day; pieces matching your topics + stance history are filed as
+pending suggestions (free, deterministic, max `CORPUS_SUGGEST_MAX`/run),
+surfaced in web Settings and counted in the morning briefing. Accept → enters
+the corpus as inspiration; reject → never shown again. Nothing trains the
+voice without your explicit yes — the human-in-the-loop rule applies to
+training data exactly as it does to posting.
 
 ## The learning layer (how it self-improves before posting exists)
 

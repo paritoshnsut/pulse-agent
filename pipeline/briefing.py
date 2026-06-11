@@ -82,6 +82,18 @@ def build(account: dict, db_path: Optional[str] = None) -> str:
         lines.append(f"\n📤 Outbox: {len(outbox)} approved and unposted ({ids}) — "
                      "post them or they go stale.")
 
+    # corpus suggestions: pieces from the polled stream that look like
+    # training material — filed here, accepted/rejected in the web app only
+    try:
+        from style.corpus import CorpusManager
+        CorpusManager(db_path=db_path).suggest(account)
+    except Exception:  # noqa: BLE001
+        pass
+    pending = memory.get_corpus_suggestions(aid, status="pending", db_path=db_path)
+    if pending:
+        lines.append(f"\n🧬 {len(pending)} writing sample(s) suggested for your "
+                     "voice corpus — review them in the web app (Settings).")
+
     preds = memory.get_open_predictions(aid, db_path=db_path)
     if preds:
         lines.append(f"\n🔮 {len(preds)} open prediction(s) being watched:")

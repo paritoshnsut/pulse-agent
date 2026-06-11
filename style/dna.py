@@ -177,6 +177,58 @@ def ngram_candidates(posts: list[str], n_range=(2, 4), min_doc_freq: int = 2, to
     return chosen
 
 
+SENTENCE_SPLIT = re.compile(r"[.!?…]+[\s\n]+|[.!?…]+$|\n+")
+OPENER_CONJ = ("and", "but", "so", "because", "yet", "still", "aur", "toh", "lekin")
+
+
+def sentence_stats(posts: list[str]) -> dict:
+    """Cadence, measured: words per sentence + how often sentences are punchy
+    fragments (<=4 words). This is the rhythm the generator must reproduce."""
+    sentences = [s.strip() for p in posts for s in SENTENCE_SPLIT.split(p) if s.strip()]
+    if not sentences:
+        return {"avg_words_per_sentence": 0, "short_sentence_rate": 0.0}
+    lens = [len(WORD.findall(s)) for s in sentences]
+    return {
+        "avg_words_per_sentence": round(sum(lens) / len(lens), 1),
+        "short_sentence_rate": round(sum(1 for n in lens if n <= 4) / len(lens), 2),
+    }
+
+
+def punctuation_profile(posts: list[str]) -> dict:
+    """Share of posts using each marker — punctuation is fingerprint-grade."""
+    n = len(posts) or 1
+    return {
+        "em_dash_rate": round(sum(1 for p in posts if "—" in p or " - " in p) / n, 2),
+        "ellipsis_rate": round(sum(1 for p in posts if "..." in p or "…" in p) / n, 2),
+        "exclaim_rate": round(sum(1 for p in posts if "!" in p) / n, 2),
+        "quote_rate": round(sum(1 for p in posts if '"' in p or "'" in p
+                                or "‘" in p or "“" in p) / n, 2),
+    }
+
+
+def opener_profile(posts: list[str]) -> dict:
+    """How posts begin — the hook habit, measured."""
+    n = len(posts) or 1
+    starts = [p.strip() for p in posts if p.strip()]
+    first_words = [(WORD.findall(s) or [""])[0].lower() for s in starts]
+    return {
+        "starts_with_number": round(sum(1 for s in starts if s[0].isdigit()) / n, 2),
+        "starts_with_question": round(
+            sum(1 for s in starts if (s.split("\n")[0].strip().endswith("?"))) / n, 2),
+        "starts_with_conjunction": round(
+            sum(1 for w in first_words if w in OPENER_CONJ) / n, 2),
+        "starts_lowercase": round(
+            sum(1 for s in starts if s[0].isalpha() and s[0].islower()) / n, 2),
+    }
+
+
+def data_rate(posts: list[str]) -> float:
+    """Share of posts containing a number/percentage — the data-backed habit."""
+    if not posts:
+        return 0.0
+    return round(sum(1 for p in posts if re.search(r"\d", p)) / len(posts), 2)
+
+
 def measure(posts: list[str]) -> dict:
     """All deterministic features in one pass."""
     er = emoji_rate(posts)
@@ -191,6 +243,12 @@ def measure(posts: list[str]) -> dict:
         "question_rate": question_rate(posts),
         "hinglish_mix": hinglish_ratio(posts),
         "hashtag_style": hashtag_descriptor(ht),
+        "mechanics": {                       # v2: fingerprint-grade measurables
+            **sentence_stats(posts),
+            **punctuation_profile(posts),
+            **opener_profile(posts),
+            "data_rate": data_rate(posts),
+        },
         "_hashtag_profile": ht,
         "_ngram_candidates": ngram_candidates(posts),
     }
@@ -222,9 +280,18 @@ class StyleDNAExtractor:
             self._client = Anthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    def _build_user_prompt(self, posts: list[str], measured: dict) -> str:
+    def _build_user_prompt(self, posts: list[str], measured: dict,
+                           inspiration: Optional[list[str]] = None) -> str:
         sample = posts[:40]  # cap tokens; the stats already summarize the rest
         joined = "\n".join(f"- {p}" for p in sample)
+        mech = measured.get("mechanics", {})
+        insp = ""
+        if inspiration:
+            excerpts = "\n".join(f"- {t[:400]}" for t in inspiration[:10])
+            insp = (
+                f"\nWRITING THE AUTHOR ADMIRES (NOT their voice — pieces they "
+                f"saved as inspiration; treat as directional pull only):\n{excerpts}\n"
+            )
         return (
             f"MEASURED STATISTICS (already computed — treat as ground truth):\n"
             f"  avg length: {measured['avg_post_length']}\n"
@@ -232,10 +299,20 @@ class StyleDNAExtractor:
             f"  ALL-CAPS emphasis: {measured['caps_for_emphasis']}\n"
             f"  rhetorical questions: {measured['uses_rhetorical_questions']}\n"
             f"  hinglish ratio (rough): {measured['hinglish_mix']}\n"
-            f"  hashtag style: {measured['hashtag_style']}\n\n"
+            f"  hashtag style: {measured['hashtag_style']}\n"
+            f"  cadence: ~{mech.get('avg_words_per_sentence')} words/sentence, "
+            f"{mech.get('short_sentence_rate')} short-fragment rate\n"
+            f"  punctuation: em-dash {mech.get('em_dash_rate')}, ellipsis "
+            f"{mech.get('ellipsis_rate')}, exclamation {mech.get('exclaim_rate')}\n"
+            f"  openers: number {mech.get('starts_with_number')}, question "
+            f"{mech.get('starts_with_question')}, conjunction "
+            f"{mech.get('starts_with_conjunction')}, lowercase "
+            f"{mech.get('starts_lowercase')}\n"
+            f"  posts containing data/numbers: {mech.get('data_rate')}\n\n"
             f"CANDIDATE RECURRING PHRASES (from frequency analysis):\n"
             f"  {measured['_ngram_candidates']}\n\n"
-            f"POST SAMPLES ({len(sample)} of {len(posts)}):\n{joined}\n\n"
+            f"POST SAMPLES ({len(sample)} of {len(posts)}):\n{joined}\n"
+            f"{insp}\n"
             "Return JSON with exactly these keys:\n"
             '  "sentence_length": short description (e.g. "short, punchy, fragments ok"),\n'
             '  "sarcasm_level": one of "none" | "low" | "moderate" | "high",\n'
@@ -244,15 +321,32 @@ class StyleDNAExtractor:
             "genuine stylistic signatures (drop generic ones); refine wording if needed,\n"
             '  "topics_preferred": array of the recurring subjects,\n'
             '  "things_to_avoid": array of style rules implied by the voice '
-            '(e.g. "formal language", "passive voice").'
+            '(e.g. "formal language", "passive voice"),\n'
+            '  "emotional_palette": 2-3 dominant emotional registers, ranked '
+            '(e.g. ["dry outrage", "amused contempt"]),\n'
+            '  "sentiment_baseline": one phrase for the default sentiment lean '
+            '(e.g. "skeptical-negative with occasional earnest pride"),\n'
+            '  "rhetorical_devices": array of devices actually used (e.g. '
+            '"irony", "contrast pairs", "callbacks", "rule of three"),\n'
+            '  "argument_structure": one sentence on how posts typically '
+            "open -> develop -> land,\n"
+            '  "register": one phrase placing the voice on colloquial-formal '
+            "and noting any code-switching"
+            + (',\n  "influences": {"admired_patterns": array of 2-4 structural/'
+               'stylistic patterns from the admired writing worth borrowing, '
+               '"themes": array of subjects the admired writing returns to}'
+               if inspiration else "")
+            + "."
         )
 
-    def judge(self, posts: list[str], measured: dict) -> dict:
+    def judge(self, posts: list[str], measured: dict,
+              inspiration: Optional[list[str]] = None) -> dict:
         msg = self.client.messages.create(
             model=self.model,
-            max_tokens=700,
+            max_tokens=1000,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": self._build_user_prompt(posts, measured)}],
+            messages=[{"role": "user",
+                       "content": self._build_user_prompt(posts, measured, inspiration)}],
         )
         text = "".join(getattr(b, "text", "") for b in msg.content)
         try:
@@ -263,7 +357,7 @@ class StyleDNAExtractor:
 
     def merge(self, measured: dict, judged: dict) -> dict:
         """Assemble Genome A. Measured numbers win; Claude fills the qualitative."""
-        return {
+        genome = {
             "sentence_length": judged.get("sentence_length", "unknown"),
             "avg_post_length": measured["avg_post_length"],          # measured
             "sarcasm_level": judged.get("sarcasm_level", "unknown"),
@@ -272,19 +366,32 @@ class StyleDNAExtractor:
             "caps_for_emphasis": measured["caps_for_emphasis"],      # measured
             "emoji_usage": measured["emoji_usage"],                  # measured
             "hashtag_style": measured["hashtag_style"],              # measured
+            "mechanics": measured.get("mechanics", {}),              # measured (v2)
             "signature_phrases": judged.get("signature_phrases", measured["_ngram_candidates"][:5]),
             "topics_preferred": judged.get("topics_preferred", []),
             "things_to_avoid": judged.get("things_to_avoid", []),
             "tone": judged.get("tone", "unknown"),
+            # v2 judged depth — sentiment and structure, not just surface
+            "emotional_palette": judged.get("emotional_palette", []),
+            "sentiment_baseline": judged.get("sentiment_baseline", ""),
+            "rhetorical_devices": judged.get("rhetorical_devices", []),
+            "argument_structure": judged.get("argument_structure", ""),
+            "register": judged.get("register", ""),
         }
+        if judged.get("influences"):
+            genome["influences"] = judged["influences"]
+        return genome
 
-    def extract(self, posts: list[str]) -> dict:
-        """Posts -> Genome A. Raises on empty input."""
+    def extract(self, posts: list[str],
+                inspiration: Optional[list[str]] = None) -> dict:
+        """Own posts (+ optional admired writing) -> Genome A. Measured stats
+        come from OWN posts only — admired editorials must never distort the
+        arithmetic of your voice. Raises on empty input."""
         posts = [p.strip() for p in posts if p and p.strip()]
         if not posts:
             raise ValueError("No non-empty posts provided.")
         measured = measure(posts)
-        judged = self.judge(posts, measured)
+        judged = self.judge(posts, measured, inspiration=inspiration)
         return self.merge(measured, judged)
 
     def extract_and_save(self, account_id: int, posts: list[str], blend: float = 0.4,

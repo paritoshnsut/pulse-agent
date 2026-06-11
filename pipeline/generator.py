@@ -176,6 +176,32 @@ def _style_rules(genome: dict) -> str:
         f"- Signature phrases you may use sparingly (do not force): {sig}\n"
         f"- NEVER do these: {avoid}\n"
     )
+    # v2 voice depth (present once the corpus has been retrained)
+    mech = genome.get("mechanics") or {}
+    if mech:
+        rules += (
+            f"- Cadence (measured — reproduce it): ~{mech.get('avg_words_per_sentence')} "
+            f"words/sentence, {mech.get('short_sentence_rate')} of sentences are "
+            f"short fragments; em-dash rate {mech.get('em_dash_rate')}, "
+            f"posts with numbers/data {mech.get('data_rate')}"
+            + (f", often opens lowercase" if (mech.get('starts_lowercase') or 0) > 0.3 else "")
+            + (f", often opens with the number" if (mech.get('starts_with_number') or 0) > 0.2 else "")
+            + "\n"
+        )
+    if genome.get("emotional_palette"):
+        rules += f"- Emotional palette (in this order): {genome['emotional_palette']}\n"
+    if genome.get("sentiment_baseline"):
+        rules += f"- Default sentiment lean: {genome['sentiment_baseline']}\n"
+    if genome.get("rhetorical_devices"):
+        rules += f"- Rhetorical devices this voice actually uses: {genome['rhetorical_devices']}\n"
+    if genome.get("argument_structure"):
+        rules += f"- How posts are built: {genome['argument_structure']}\n"
+    if genome.get("register"):
+        rules += f"- Register: {genome['register']}\n"
+    influences = genome.get("influences") or {}
+    if influences.get("admired_patterns"):
+        rules += (f"- Patterns from writing this author admires (borrow the move, "
+                  f"keep the voice above): {influences['admired_patterns']}\n")
     lp = genome.get("learned_preferences") or {}
     if lp.get("emphasize"):
         rules += f"- This writer approves drafts that do this — do MORE of it: {lp['emphasize']}\n"

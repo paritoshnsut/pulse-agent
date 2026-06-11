@@ -178,6 +178,43 @@ CREATE TABLE IF NOT EXISTS kv_store (
     value TEXT NOT NULL
 );
 
+-- The voice corpus: every writing sample the voice is trained on, kept
+-- forever (training is no longer one-shot paste-and-lose). kind='own' are
+-- posts the user wrote — they define the voice and feed the measured stats.
+-- kind='inspiration' are pieces the user admires (editorials, threads,
+-- articles) — they inform qualitative influence, never the measured voice.
+-- Engagement columns are optional analytics the user attaches so proven
+-- high-performers weigh more when the corpus outgrows the training cap.
+CREATE TABLE IF NOT EXISTS voice_samples (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES accounts(id),
+    kind         TEXT NOT NULL DEFAULT 'own',   -- own | inspiration
+    content      TEXT NOT NULL,
+    content_hash TEXT NOT NULL,                 -- dedup key (per account)
+    origin       TEXT,                          -- manual | article:<id> | url
+    likes        INTEGER,                       -- optional analytics
+    retweets     INTEGER,
+    replies      INTEGER,
+    active       INTEGER NOT NULL DEFAULT 1,
+    added_at     TEXT NOT NULL,
+    UNIQUE(account_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_voice_samples_acct ON voice_samples(account_id, kind);
+
+-- Corpus suggestions: pieces from the polled stream (articles/editorials/
+-- reddit) that look like training material for an account. NEVER auto-added —
+-- the user accepts or rejects each one (the human-in-the-loop rule applies to
+-- training data exactly as it does to posting).
+CREATE TABLE IF NOT EXISTS corpus_suggestions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    article_id  INTEGER NOT NULL REFERENCES articles(id),
+    reason      TEXT,                           -- why it was suggested
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected
+    created_at  TEXT NOT NULL,
+    UNIQUE(account_id, article_id)
+);
+
 -- Predictions this account has staked publicly. Written by the memory updater
 -- when a posted item contains a verifiable claim about the future; consumed
 -- later by the callback generator ("I called this") when outcomes land.

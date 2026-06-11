@@ -142,6 +142,11 @@ class StyleBody(BaseModel):
     blend: float = 0.4
 
 
+class CorpusBody(BaseModel):
+    text: str
+    kind: str = "own"  # own | inspiration
+
+
 class PostedBody(BaseModel):
     url: Optional[str] = None
 
@@ -239,14 +244,80 @@ def get_style(account_id: int, user: dict = Depends(require_auth)):
 
 @app.post("/api/accounts/{account_id}/style")
 def train_style(account_id: int, body: StyleBody, user: dict = Depends(require_auth)):
+    """Legacy one-shot trainer; now also files the posts into the corpus so
+    nothing pasted is ever lost. Prefer the /corpus + /retrain endpoints."""
     _own_account(account_id, user)
     posts = [p.strip() for p in body.posts if p and p.strip()]
     if len(posts) < 5:
         raise HTTPException(status_code=400,
                             detail="Paste at least 5 posts (50-200 is ideal).")
+    memory.add_voice_samples(account_id,
+                             [{"content": p, "kind": "own"} for p in posts],
+                             db_path=_db())
     genome = StyleDNAExtractor().extract_and_save(
         account_id, posts, blend=body.blend, db_path=_db())
     return {"genome_a": genome, "sample_count": len(posts)}
+
+
+# --------------------------------------------------------------------------- #
+# Routes — voice corpus (the living training set)
+# --------------------------------------------------------------------------- #
+@app.get("/api/accounts/{account_id}/corpus")
+def corpus_stats(account_id: int, user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    from style.corpus import CorpusManager
+    mgr = CorpusManager(db_path=_db())
+    account = memory.get_account(account_id, db_path=_db())
+    mgr.suggest(account)  # cheap, deterministic; keeps suggestions fresh
+    dna = memory.get_style_dna(account_id, db_path=_db())
+    return {
+        "counts": memory.count_voice_samples(account_id, db_path=_db()),
+        "voice_version": dna["version"] if dna else 0,
+        "trained_on": dna["sample_count"] if dna else 0,
+        "suggestions": [
+            {"id": s["id"], "title": s["title"], "source": s.get("source_name"),
+             "reason": s["reason"], "url": s.get("url")}
+            for s in memory.get_corpus_suggestions(account_id, db_path=_db())
+        ],
+    }
+
+
+@app.post("/api/accounts/{account_id}/corpus")
+def corpus_add(account_id: int, body: CorpusBody, user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    if body.kind not in ("own", "inspiration"):
+        raise HTTPException(status_code=400, detail="kind must be own|inspiration")
+    from style.corpus import CorpusManager
+    return CorpusManager(db_path=_db()).add(account_id, body.text, kind=body.kind)
+
+
+@app.post("/api/accounts/{account_id}/retrain")
+def corpus_retrain(account_id: int, user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    from style.corpus import CorpusManager
+    try:
+        out = CorpusManager(db_path=_db()).retrain(account_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return out
+
+
+@app.post("/api/suggestions/{suggestion_id}/{verdict}")
+def corpus_suggestion_verdict(suggestion_id: int, verdict: str, account_id: int,
+                              user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    if verdict not in ("accept", "reject"):
+        raise HTTPException(status_code=400, detail="verdict must be accept|reject")
+    from style.corpus import CorpusManager
+    mgr = CorpusManager(db_path=_db())
+    if verdict == "accept":
+        try:
+            mgr.accept_suggestion(suggestion_id, account_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+    else:
+        mgr.reject_suggestion(suggestion_id)
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- #

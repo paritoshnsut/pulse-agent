@@ -13,13 +13,21 @@ const WATCH_PLACEHOLDERS = {
 export default function Settings({ accounts, refreshAccounts }) {
   const [form, setForm] = useState({ handle: '', niche: '', topics: '' });
   const [voiceFor, setVoiceFor] = useState('');
-  const [pastedPosts, setPastedPosts] = useState('');
+  const [pasted, setPasted] = useState('');
+  const [kind, setKind] = useState('own');
+  const [corpus, setCorpus] = useState(null);
   const [watch, setWatch] = useState([]);
   const [w, setW] = useState({ kind: 'youtube_channel', ref: '', label: '' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { api('/api/watch').then(setWatch).catch(() => {}); }, []);
+  useEffect(() => {
+    if (voiceFor) api(`/api/accounts/${voiceFor}/corpus`).then(setCorpus).catch(() => {});
+    else setCorpus(null);
+  }, [voiceFor]);
+  const refreshCorpus = () =>
+    voiceFor && api(`/api/accounts/${voiceFor}/corpus`).then(setCorpus).catch(() => {});
 
   const createAccount = async () => {
     await api('/api/accounts', {
@@ -32,18 +40,35 @@ export default function Settings({ accounts, refreshAccounts }) {
     });
     setForm({ handle: '', niche: '', topics: '' });
     refreshAccounts();
-    setMsg('Account created. Now train its voice below — paste 50-200 of its past posts.');
+    setMsg('Account created. Now feed its voice corpus below.');
   };
 
-  const train = async () => {
-    const posts = pastedPosts.split('\n').map((l) => l.trim()).filter(Boolean);
+  const addToCorpus = async () => {
     setBusy(true); setMsg('');
     try {
-      await api(`/api/accounts/${voiceFor}/style`, { method: 'POST', body: { posts } });
-      setMsg(`Voice trained on ${posts.length} posts ✓ — drafts will now sound like this account.`);
-      setPastedPosts('');
-      refreshAccounts();
+      const r = await api(`/api/accounts/${voiceFor}/corpus`,
+        { method: 'POST', body: { text: pasted, kind } });
+      setMsg(`Added ${r.added} sample(s) (${r.duplicates} already known). ` +
+        `Corpus: ${r.corpus.own} of your posts + ${r.corpus.inspiration} inspiration pieces.`);
+      setPasted('');
+      refreshCorpus();
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+
+  const retrain = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await api(`/api/accounts/${voiceFor}/retrain`, { method: 'POST' });
+      setMsg(`Voice retrained on ${r.trained_on} of your posts` +
+        (r.inspiration_used ? ` + ${r.inspiration_used} inspiration pieces` : '') +
+        ' ✓ — drafts pick this up immediately.');
+      refreshAccounts(); refreshCorpus();
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+
+  const judgeSuggestion = async (id, verdict) => {
+    await api(`/api/suggestions/${id}/${verdict}?account_id=${voiceFor}`, { method: 'POST' });
+    refreshCorpus();
   };
 
   const addWatch = async () => {
@@ -93,34 +118,83 @@ export default function Settings({ accounts, refreshAccounts }) {
       </Card>
 
       <Card>
-        <div className="font-medium mb-2">🧬 Train a voice</div>
+        <div className="font-medium mb-2">🧬 Voice corpus — feed it daily</div>
         <div className="text-sm text-zinc-400 mb-2">
-          Paste 50–200 of the account's past posts, ONE PER LINE. The best
-          predictor of quality in the whole system.
+          Everything you add is kept forever and the voice retrains on the full
+          set. Add your own tweets (one per line — optionally end a line with
+          <code className="text-zinc-300"> | likes retweets replies</code> so
+          proven winners weigh more) or paste a whole editorial/thread you
+          admire as inspiration.
         </div>
-        <select
-          value={voiceFor}
-          onChange={(e) => setVoiceFor(e.target.value)}
-          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm mb-2"
-        >
-          <option value="">pick account…</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>@{a.handle}</option>
-          ))}
-        </select>
+        <div className="flex gap-2 mb-2 flex-wrap items-center">
+          <select
+            value={voiceFor}
+            onChange={(e) => setVoiceFor(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm"
+          >
+            <option value="">pick account…</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>@{a.handle}</option>
+            ))}
+          </select>
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm"
+          >
+            <option value="own">my own posts (one per line)</option>
+            <option value="inspiration">writing I admire (one whole piece)</option>
+          </select>
+          {corpus && (
+            <Chip>
+              corpus: {corpus.counts.own} own · {corpus.counts.inspiration} inspiration
+              {corpus.voice_version ? ` · voice v${corpus.voice_version}` : ' · no voice yet'}
+            </Chip>
+          )}
+        </div>
         <textarea
           rows="8"
-          value={pastedPosts}
-          onInput={(e) => setPastedPosts(e.target.value)}
-          placeholder={'RBI holds rates again. let that sink in\nNew GDP numbers out. 7.2%. Sounds great until you see the base effect.\n…'}
+          value={pasted}
+          onInput={(e) => setPasted(e.target.value)}
+          placeholder={kind === 'own'
+            ? 'RBI holds rates again. let that sink in | 230 41 12\nNew GDP numbers out. 7.2%. Sounds great until you see the base effect.\n…'
+            : 'Paste the full editorial / thread / article you admire — stored as one piece.'}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-sm placeholder-zinc-600"
         />
-        <div className="mt-2">
-          <Btn color="green" disabled={!voiceFor || busy} onClick={train}>
-            {busy ? 'analyzing your voice…' : 'Train voice'}
+        <div className="mt-2 flex gap-2">
+          <Btn color="blue" disabled={!voiceFor || !pasted.trim() || busy} onClick={addToCorpus}>
+            Add to corpus
+          </Btn>
+          <Btn color="green" disabled={!voiceFor || busy} onClick={retrain}>
+            {busy ? 'analyzing the voice…' : 'Retrain voice from corpus'}
           </Btn>
         </div>
       </Card>
+
+      {corpus && corpus.suggestions.length > 0 && (
+        <Card>
+          <div className="font-medium mb-2">📥 Suggested for your corpus</div>
+          <div className="text-sm text-zinc-400 mb-2">
+            Pieces from the watched feeds that match your interests. Nothing is
+            used for training unless you accept it.
+          </div>
+          {corpus.suggestions.map((s) => (
+            <div key={s.id} className="py-2 border-b border-zinc-800 last:border-0">
+              <div className="text-sm">
+                {s.url
+                  ? <a href={s.url} target="_blank" rel="noreferrer" className="text-sky-400">{s.title}</a>
+                  : s.title}
+                {s.source && <span className="text-zinc-500"> — {s.source}</span>}
+              </div>
+              <div className="text-xs text-zinc-500 mb-1">{s.reason}</div>
+              <div className="flex gap-2">
+                <Btn color="green" onClick={() => judgeSuggestion(s.id, 'accept')}>add as inspiration</Btn>
+                <Btn onClick={() => judgeSuggestion(s.id, 'reject')}>skip</Btn>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
 
       <Card>
         <div className="font-medium mb-2">👀 What it watches</div>

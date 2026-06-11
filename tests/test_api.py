@@ -81,6 +81,40 @@ def test_voice_training_endpoint(client, temp_db, monkeypatch):
     assert client.get("/api/accounts").json()[0]["has_voice"] is True
 
 
+def test_corpus_endpoints(client, temp_db, monkeypatch):
+    from style import corpus as corpus_mod
+
+    acct = client.post("/api/accounts", json={"handle": "me",
+                                              "topics": ["rbi policy"]}).json()
+    # add own samples with an analytics suffix
+    r = client.post(f"/api/accounts/{acct['id']}/corpus",
+                    json={"text": "tweet a | 120 30\ntweet b", "kind": "own"}).json()
+    assert r["added"] == 2 and r["corpus"]["own"] == 2
+    # inspiration is one piece
+    r = client.post(f"/api/accounts/{acct['id']}/corpus",
+                    json={"text": "An editorial.\n\nMore of it.",
+                          "kind": "inspiration"}).json()
+    assert r["corpus"]["inspiration"] == 1
+
+    # a matching article -> suggestion appears in corpus stats
+    memory.insert_article({"source": "rss", "url": "https://t/sg",
+                           "title": "RBI policy outlook editorial",
+                           "published_at": memory._now()}, db_path=temp_db)
+    stats = client.get(f"/api/accounts/{acct['id']}/corpus").json()
+    assert stats["counts"]["own"] == 2
+    assert len(stats["suggestions"]) == 1
+    sid = stats["suggestions"][0]["id"]
+    client.post(f"/api/suggestions/{sid}/accept?account_id={acct['id']}")
+    assert client.get(f"/api/accounts/{acct['id']}/corpus").json()["counts"]["inspiration"] == 2
+
+    # retrain (Claude stubbed at the manager level)
+    monkeypatch.setattr(corpus_mod.CorpusManager, "retrain",
+                        lambda self, account_id, blend=None: {
+                            "trained_on": 2, "inspiration_used": 2,
+                            "genome_a": {}, "corpus": {}})
+    assert client.post(f"/api/accounts/{acct['id']}/retrain").json()["trained_on"] == 2
+
+
 # --------------------------------------------------------------- review lane
 def test_full_review_lifecycle(client, temp_db, monkeypatch):
     from pipeline import updater as updater_mod

@@ -332,6 +332,96 @@ def get_signals_by_tier(tier: str, db_path: Optional[str] = None) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Voice corpus (persistent training data) + corpus suggestions
+# --------------------------------------------------------------------------- #
+def _content_hash(content: str) -> str:
+    import hashlib
+    return hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
+
+
+def add_voice_samples(account_id: int, items: list[dict],
+                      db_path: Optional[str] = None) -> dict:
+    """Add samples to the corpus. Each item: {content, kind?, origin?, likes?,
+    retweets?, replies?}. Deduplicated per account by content hash — re-pasting
+    the same tweet is a no-op. Returns {"added": n, "duplicates": m}."""
+    added = dup = 0
+    with get_conn(db_path) as conn:
+        for it in items:
+            content = (it.get("content") or "").strip()
+            if not content:
+                continue
+            cur = conn.execute(
+                """INSERT INTO voice_samples
+                   (account_id, kind, content, content_hash, origin,
+                    likes, retweets, replies, active, added_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                   ON CONFLICT(account_id, content_hash) DO NOTHING""",
+                (account_id, it.get("kind") or "own", content,
+                 _content_hash(content), it.get("origin") or "manual",
+                 it.get("likes"), it.get("retweets"), it.get("replies"), _now()),
+            )
+            added += int(bool(cur.rowcount))
+            dup += int(not cur.rowcount)
+    return {"added": added, "duplicates": dup}
+
+
+def get_voice_samples(account_id: int, kind: Optional[str] = None,
+                      db_path: Optional[str] = None) -> list[dict]:
+    q = "SELECT * FROM voice_samples WHERE account_id = ? AND active = 1"
+    params: list[Any] = [account_id]
+    if kind:
+        q += " AND kind = ?"; params.append(kind)
+    q += " ORDER BY added_at"
+    with get_conn(db_path) as conn:
+        return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def count_voice_samples(account_id: int, db_path: Optional[str] = None) -> dict:
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT kind, COUNT(*) AS n FROM voice_samples
+               WHERE account_id = ? AND active = 1 GROUP BY kind""",
+            (account_id,),
+        ).fetchall()
+    counts = {r["kind"]: r["n"] for r in rows}
+    return {"own": counts.get("own", 0), "inspiration": counts.get("inspiration", 0)}
+
+
+def insert_corpus_suggestion(account_id: int, article_id: int, reason: str,
+                             db_path: Optional[str] = None) -> bool:
+    """True if newly suggested; False if this article was already surfaced."""
+    with get_conn(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO corpus_suggestions
+               (account_id, article_id, reason, status, created_at)
+               VALUES (?, ?, ?, 'pending', ?)
+               ON CONFLICT(account_id, article_id) DO NOTHING""",
+            (account_id, article_id, reason, _now()),
+        )
+        return bool(cur.rowcount)
+
+
+def get_corpus_suggestions(account_id: int, status: str = "pending",
+                           db_path: Optional[str] = None) -> list[dict]:
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT cs.*, a.title, a.description, a.content, a.source_name, a.url
+               FROM corpus_suggestions cs JOIN articles a ON a.id = cs.article_id
+               WHERE cs.account_id = ? AND cs.status = ?
+               ORDER BY cs.created_at DESC""",
+            (account_id, status),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def set_suggestion_status(suggestion_id: int, status: str,
+                          db_path: Optional[str] = None) -> None:
+    with get_conn(db_path) as conn:
+        conn.execute("UPDATE corpus_suggestions SET status = ? WHERE id = ?",
+                     (status, suggestion_id))
+
+
+# --------------------------------------------------------------------------- #
 # Style DNA
 # --------------------------------------------------------------------------- #
 def save_style_dna(
