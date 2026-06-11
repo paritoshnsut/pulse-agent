@@ -407,7 +407,9 @@ a dead end.
 
 > Ideas we evaluated and deliberately parked (knowledge graph, live-stream
 > interceptor, opponent mirror, …) live in [DEFERRED.md](DEFERRED.md) with the
-> reason and the trigger that would make each worth building.
+> reason and the trigger that would make each worth building. The full
+> built-vs-planned status of every original-spec + Grok-suggested feature is
+> tracked in [CLAUDE.md](CLAUDE.md) (the living build spec).
 
 ## The intelligence layer (CLAUDE.md's 12, scored honestly)
 
