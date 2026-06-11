@@ -5,7 +5,12 @@ import os
 import sys
 import tempfile
 
-import pytest
+# Redirect the DEFAULT database to a temp file BEFORE config is imported, so
+# code paths that fall back to settings.db_path (cost ledger, budget checks)
+# can never touch a real agent.db during tests.
+os.environ.setdefault("DB_PATH", os.path.join(tempfile.gettempdir(), "pulse-test-default.db"))
+
+import pytest  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(__file__))
 

@@ -103,6 +103,10 @@ def main() -> None:
                                  replies=args.replies, views=args.views)
         print(f"Engagement logged for #{args.perf}: {args.likes} likes, "
               f"{args.retweets} RTs, {args.replies} replies, {args.views} views.")
+        from style.corpus import file_posted_draft
+        if file_posted_draft(args.perf):
+            print("(filed into your voice corpus with these numbers — "
+                  "proven posts train the voice)")
         return
 
     account_id = None

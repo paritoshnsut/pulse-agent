@@ -28,6 +28,7 @@ import re
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 
 logger = logging.getLogger("scorer")
 
@@ -123,7 +124,8 @@ class PersonaConsistencyScorer:
     def score(self, text: str, genome: dict) -> dict:
         """Return per-axis scores, composite, mechanical checks, and feedback."""
         mech = mechanical_checks(text, genome)
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "scorer",
+            
             model=self.model, max_tokens=400,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": self._build_prompt(text, genome)}],

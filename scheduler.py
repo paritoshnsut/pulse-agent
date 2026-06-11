@@ -112,6 +112,13 @@ def job_counter():
         logger.info("counter: %s", tally)
 
 
+def job_backup():
+    """Daily snapshot of the SQLite brain (VACUUM INTO), oldest pruned.
+    The whole moat is one file — this is the insurance."""
+    path = memory.backup_db()
+    logger.info("backup written: %s", path)
+
+
 def job_briefing():
     """Daily morning digest per account: ideas bank (COOL signals), outbox
     nag, open predictions, yesterday's numbers, timing advice."""
@@ -170,6 +177,8 @@ def job_process():
     gen, scorer = ContentGenerator(), PersonaConsistencyScorer()
     notifier = poster.TelegramNotifier()
     retriever = ContextRetriever()
+    from pipeline.grounding import GroundingChecker
+    grounding = GroundingChecker() if settings.grounding_enabled else None
 
     for acct in accounts:
         tally = agent.run(acct, limit=settings.process_batch, per_account=True)
@@ -213,7 +222,7 @@ def job_process():
                     ctx = f"{ctx}\n{excerpt}" if ctx else excerpt
             draft = gen.generate_checked(s, genome, fmt=fmt, scorer=scorer,
                                          account_id=acct["id"], persist=True,
-                                         context=ctx)
+                                         context=ctx, grounding=grounding)
             drafted += 1
             flag = " NEEDS REVIEW" if draft["needs_review"] else ""
             score = f"{draft['persona_score']:.0f}" if draft["persona_score"] is not None else "-"
@@ -245,6 +254,7 @@ JOBS = [
     ("counter", job_counter, settings.poll_counter_min),
     ("crowd", job_crowd, settings.poll_crowd_min),
     ("learn", job_learn, settings.poll_learn_min),
+    ("backup", job_backup, 24 * 60),
 ]
 if settings.telegram_bot_token and settings.telegram_chat_id:
     JOBS.append(("telegram", job_telegram, settings.poll_telegram_min))

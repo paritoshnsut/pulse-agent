@@ -105,6 +105,13 @@ def build(account: dict, db_path: Optional[str] = None) -> str:
     lines.append(f"\n📊 Last 24h: {st['drafted']} drafted · {st['approved']} approved · "
                  f"{st['rejected']} rejected · {st['posted']} posted · "
                  f"historical_perf {hp}")
+    try:
+        from config import settings as cfg
+        spent = memory.cost_today(db_path=db_path)
+        cap = f" of ${cfg.daily_budget_usd:.2f} cap" if cfg.daily_budget_usd > 0 else ""
+        lines.append(f"💰 Claude spend today: ${spent:.2f}{cap}")
+    except Exception:  # noqa: BLE001
+        pass
     lines.append(f"⏰ {timing.describe_windows(aid, db_path=db_path)}")
     return "\n".join(lines)
 

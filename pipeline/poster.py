@@ -82,6 +82,31 @@ def copy_to_clipboard(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Message formatting (pure functions — also used by the Telegram commander)
 # --------------------------------------------------------------------------- #
+def _age_hours(post: dict) -> Optional[float]:
+    from datetime import datetime, timezone
+    try:
+        created = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created).total_seconds() / 3600
+    except (KeyError, ValueError, AttributeError, TypeError):
+        return None
+
+
+def _warning_lines(post: dict) -> list[str]:
+    """Grounding + staleness warnings, shared by the alert and the package."""
+    lines = []
+    claims = (post.get("meta_json") or {}).get("ungrounded_claims") or []
+    if claims:
+        lines.append("🚨 VERIFY BEFORE POSTING — claims not found in the source:")
+        lines += [f"  • {c}" for c in claims[:5]]
+    age = _age_hours(post)
+    if age is not None and age >= settings.draft_stale_hours:
+        lines.append(f"⏳ this draft is {age:.0f}h old — check the moment "
+                     "hasn't passed before posting")
+    return lines
+
+
 def format_draft_alert(post: dict, article_title: Optional[str] = None) -> str:
     """The push you get the moment a draft exists. Act from your phone."""
     score = f"{post['persona_score']:.0f}" if post.get("persona_score") is not None else "—"
@@ -90,6 +115,7 @@ def format_draft_alert(post: dict, article_title: Optional[str] = None) -> str:
     if article_title:
         lines.append(f"re: {article_title}")
     lines += ["─" * 24, post["content"], "─" * 24]
+    lines += _warning_lines(post)
     hooks = (post.get("meta_json") or {}).get("alt_hooks") or []
     if hooks:
         lines.append("alt hooks (swap in when you post, if stronger):")
@@ -103,6 +129,7 @@ def format_approved_package(post: dict, db_path: Optional[str] = None) -> str:
     intent link(s), timing advice, and what to do after."""
     parts = postable_texts(post)
     lines = [f"✅ Draft #{post['id']} approved — post it yourself:"]
+    lines += _warning_lines(post)
     if len(parts) == 1:
         n = len(parts[0])
         over = f"  ⚠️ {n - X_CHAR_LIMIT} over the limit, trim in the compose box" if n > X_CHAR_LIMIT else ""

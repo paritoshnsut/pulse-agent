@@ -31,6 +31,7 @@ import re
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 
 logger = logging.getLogger("generator")
@@ -289,7 +290,8 @@ class ContentGenerator:
         )
 
     def _call(self, prompt: str, max_tokens: int) -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "generator",
+            
             model=self.model,
             max_tokens=max_tokens,
             system=SYSTEM_PROMPT,
@@ -413,14 +415,17 @@ class ContentGenerator:
         persist: bool = False,
         db_path: Optional[str] = None,
         context: Optional[str] = None,
+        grounding: Any = None,
     ) -> dict:
         """
         Generate -> enforce style -> score against Genome A -> regenerate with
-        feedback if below the gate (rule #9). Returns the best draft with its
-        score and a needs_review flag. Optionally persists to the posts table.
+        feedback if below the gate (rule #9) -> grounding audit. Returns the
+        best draft with its score and a needs_review flag. Optionally persists.
 
         scorer: a PersonaConsistencyScorer (or None to skip scoring entirely).
         context: rendered memory block from pipeline/context.py (optional).
+        grounding: a GroundingChecker — flags claims unsupported by the
+        signal+context and force-sets needs_review when any are found.
         """
         best: dict = {}
         feedback = ""
@@ -454,9 +459,20 @@ class ContentGenerator:
         best.setdefault("needs_review", best.get("persona_score") is None
                         or best.get("persona_score", 0) < gate)
 
+        # grounding audit: claims the source material doesn't support get
+        # spotlighted for the human and force the review flag
+        if grounding is not None and not best["empty"]:
+            from pipeline.grounding import build_source_block
+            result = grounding.check(best["content"],
+                                     build_source_block(signal, context))
+            best["ungrounded_claims"] = result["ungrounded_claims"]
+            if result["ungrounded_claims"]:
+                best["needs_review"] = True
+
         if persist and account_id is not None:
             meta = {k: best.get(k) for k in ("tweets", "hashtags", "axes", "mechanical",
-                                             "note", "char_count", "emotion")}
+                                             "note", "char_count", "emotion",
+                                             "ungrounded_claims")}
             best["post_id"] = memory.save_post(
                 account_id=account_id, fmt=best["format"], content=best["content"],
                 meta=meta, signal_id=signal.get("id"), article_id=signal.get("article_id"),

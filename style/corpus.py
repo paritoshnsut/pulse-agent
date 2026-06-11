@@ -88,6 +88,35 @@ def select_training_set(samples: list[dict], cap: int) -> list[dict]:
     return chosen
 
 
+def file_posted_draft(post_id: int, db_path: Optional[str] = None) -> bool:
+    """The flywheel: a POSTED draft with measured engagement is, by
+    definition, an audience-validated sample of your own published voice —
+    it was human-approved at posting time, so auto-filing it breaks no
+    human-in-the-loop rule. Called whenever /perf lands. Threads file one
+    sample per tweet. Re-logging /perf updates the sample's numbers.
+    Returns True if anything was filed/updated."""
+    post = memory.get_post(post_id, db_path=db_path)
+    if not post or post["status"] != "posted":
+        return False
+    eng = memory.get_engagement_for_post(post_id, db_path=db_path)
+    if not eng:
+        return False
+    texts = (post.get("meta_json") or {}).get("tweets") or \
+        [t for t in post["content"].split("\n\n———\n\n") if t.strip()]
+    items = [{"content": t, "kind": "own", "origin": "approved_draft",
+              "likes": eng["likes"], "retweets": eng["retweets"],
+              "replies": eng["replies"]} for t in texts]
+    result = memory.add_voice_samples(post["account_id"], items, db_path=db_path)
+    if result["duplicates"]:  # already filed — refresh the numbers instead
+        for t in texts:
+            memory.touch_voice_sample_engagement(
+                post["account_id"], t, eng["likes"], eng["retweets"],
+                eng["replies"], db_path=db_path)
+    logger.info("Flywheel: filed post #%d into the corpus (%d sample(s), "
+                "%d updated).", post_id, result["added"], result["duplicates"])
+    return True
+
+
 class CorpusManager:
     """Add to / retrain from / suggest for the voice corpus."""
 

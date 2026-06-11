@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory, poster
 from pipeline.context import ContextRetriever, extract_keywords
 from pipeline.generator import ContentGenerator
@@ -107,7 +108,8 @@ class CounterNarrativeDetector:
             '  "worth": true ONLY if the missing angle is genuinely strong; '
             "false if coverage already has the story covered."
         )
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "counter",
+            
             model=self.model, max_tokens=300,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
@@ -137,10 +139,13 @@ class CounterNarrativeDetector:
         gen = ContentGenerator(client=self._client, model=self.model)
         scorer = (PersonaConsistencyScorer(client=self._client, model=self.model)
                   if self._client else PersonaConsistencyScorer())
+        from pipeline.grounding import GroundingChecker
+        grounding = (GroundingChecker(client=self._client, model=self.model)
+                     if settings.grounding_enabled else None)
         draft = gen.generate_checked(
             counter_signal, genome, fmt="counter_narrative", scorer=scorer,
             account_id=account["id"], persist=True, db_path=self.db_path,
-            context=context,
+            context=context, grounding=grounding,
         )
         if draft.get("post_id"):
             poster.TelegramNotifier().notify_draft(

@@ -386,7 +386,9 @@ def log_perf(post_id: int, body: PerfBody, user: dict = Depends(require_auth)):
     _own_post(post_id, user)
     memory.record_engagement(post_id, likes=body.likes, retweets=body.retweets,
                              replies=body.replies, views=body.views, db_path=_db())
-    return {"ok": True}
+    from style.corpus import file_posted_draft
+    filed = file_posted_draft(post_id, db_path=_db())
+    return {"ok": True, "filed_to_corpus": filed}
 
 
 # --------------------------------------------------------------------------- #
@@ -472,6 +474,8 @@ def status(user: dict = Depends(require_auth)):
         "auth_enabled": settings.auth_mode != "dev",
         "auth_mode": settings.auth_mode,
         "user_email": user.get("email"),
+        "spend_today_usd": memory.cost_today(db_path=_db()),
+        "daily_budget_usd": settings.daily_budget_usd,
     }
 
 

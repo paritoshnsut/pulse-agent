@@ -9,3 +9,4 @@ cards/
 .git
 tests/
 frontend/node_modules
+backups/

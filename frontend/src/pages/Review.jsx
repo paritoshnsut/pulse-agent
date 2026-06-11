@@ -12,6 +12,8 @@ function DraftCard({ p, refresh }) {
   const [phase, setPhase] = useState(p.status);
   const [msg, setMsg] = useState('');
   const hooks = (p.meta_json || {}).alt_hooks || [];
+  const ungrounded = (p.meta_json || {}).ungrounded_claims || [];
+  const ageH = Math.round((Date.now() - new Date(p.created_at)) / 36e5);
 
   const approve = async () => {
     setPkg(await api(`/api/drafts/${p.id}/approve`, { method: 'POST' }));
@@ -45,8 +47,24 @@ function DraftCard({ p, refresh }) {
         {p.persona_score != null && <Chip>voice {Math.round(p.persona_score)}/100</Chip>}
         {!!p.needs_review && <Chip>⚠️ check carefully</Chip>}
         <Chip>{phase}</Chip>
+        {Number.isFinite(ageH) && ageH >= 1 && (
+          <span className={`px-2 py-0.5 rounded-full text-xs ${
+            ageH >= 24 ? 'bg-rose-900 text-rose-200' : 'bg-zinc-800 text-zinc-400'}`}>
+            {ageH}h old{ageH >= 24 ? ' — moment may have passed' : ''}
+          </span>
+        )}
       </div>
       <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{p.content}</div>
+      {ungrounded.length > 0 && (
+        <div className="mt-3 rounded-lg border border-rose-800 bg-rose-950/50 p-3 text-sm">
+          <div className="font-medium text-rose-300">
+            🚨 Verify before posting — claims not found in the source:
+          </div>
+          {ungrounded.map((c, i) => (
+            <div key={i} className="text-rose-200/90 mt-1">• {c}</div>
+          ))}
+        </div>
+      )}
 
       {hooks.length > 0 && (
         <div className="mt-3 text-sm text-zinc-400">

@@ -103,10 +103,13 @@ class EvergreenGenerator:
         gen = ContentGenerator(client=self._client, model=self.model)
         scorer = (PersonaConsistencyScorer(client=self._client, model=self.model)
                   if self._client else PersonaConsistencyScorer())
+        from pipeline.grounding import GroundingChecker
+        grounding = (GroundingChecker(client=self._client, model=self.model)
+                     if settings.grounding_enabled else None)
         draft = gen.generate_checked(
             signal, genome, fmt="evergreen", scorer=scorer,
             account_id=account["id"], persist=True, db_path=self.db_path,
-            context=ctx,
+            context=ctx, grounding=grounding,
         )
         if draft.get("post_id"):
             memory.update_post_meta(draft["post_id"],

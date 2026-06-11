@@ -171,6 +171,19 @@ CREATE TABLE IF NOT EXISTS engagement (
 );
 CREATE INDEX IF NOT EXISTS idx_engagement_post ON engagement(post_id);
 
+-- Every Claude call: which module spent what. The audit trail + the daily
+-- budget guard's ledger (pipeline/llm.py).
+CREATE TABLE IF NOT EXISTS claude_logs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    module        TEXT NOT NULL,             -- decision | generator | scorer | ...
+    model         TEXT,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claude_logs_created ON claude_logs(created_at);
+
 -- Tiny key-value store for process state that must survive restarts
 -- (e.g. the Telegram getUpdates offset so commands aren't reprocessed).
 CREATE TABLE IF NOT EXISTS kv_store (

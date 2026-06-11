@@ -32,6 +32,7 @@ import re
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 
 logger = logging.getLogger("updater")
@@ -93,7 +94,8 @@ class MemoryUpdater:
 
     def extract(self, post_content: str, article: Optional[dict] = None,
                 topic_hint: str = "") -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "updater",
+            
             model=self.model, max_tokens=300,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user",

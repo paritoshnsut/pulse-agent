@@ -32,6 +32,7 @@ import re
 from typing import Any, Callable, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 from style import dna
 
@@ -183,7 +184,8 @@ class CrowdWisdomScraper:
         )
 
     def judge(self, texts: list[str], measured: dict) -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "crowd",
+            
             model=self.model,
             max_tokens=700,
             system=SYSTEM_PROMPT,

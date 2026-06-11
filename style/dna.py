@@ -29,6 +29,7 @@ from collections import Counter
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 
 logger = logging.getLogger("dna")
@@ -341,7 +342,8 @@ class StyleDNAExtractor:
 
     def judge(self, posts: list[str], measured: dict,
               inspiration: Optional[list[str]] = None) -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "dna",
+            
             model=self.model,
             max_tokens=1000,
             system=SYSTEM_PROMPT,

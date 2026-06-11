@@ -151,6 +151,24 @@ class Settings:
     def allowed_email_set(self) -> set:
         return {e.strip().lower() for e in self.allowed_emails.split(",") if e.strip()}
 
+    # --- Cost guard: every Claude call is logged (claude_logs) with an
+    # estimated cost; when today's spend crosses the budget, calls stop and a
+    # Telegram alert fires once. 0 disables the cap (logging always on). ---
+    daily_budget_usd: float = float(os.getenv("DAILY_BUDGET_USD", "5.0"))
+    cost_in_per_mtok: float = float(os.getenv("COST_IN_PER_MTOK", "3.0"))
+    cost_out_per_mtok: float = float(os.getenv("COST_OUT_PER_MTOK", "15.0"))
+
+    # --- Grounding shield: pre-review check that every factual claim in a
+    # draft is supported by the source material the model was given ---
+    grounding_enabled: bool = os.getenv("GROUNDING_ENABLED", "1").lower() not in ("0", "false", "")
+
+    # --- Draft staleness: warn when a draft has been waiting this long ---
+    draft_stale_hours: int = int(os.getenv("DRAFT_STALE_HOURS", "24"))
+
+    # --- Backups: daily VACUUM INTO copies, oldest pruned past the cap ---
+    backups_dir: str = os.getenv("BACKUPS_DIR", str(PROJECT_ROOT / "backups"))
+    backup_keep: int = int(os.getenv("BACKUP_KEEP", "7"))
+
     # --- Voice corpus: training-set caps + suggestion throttle ---
     corpus_max_own: int = int(os.getenv("CORPUS_MAX_OWN", "300"))
     corpus_max_inspiration: int = int(os.getenv("CORPUS_MAX_INSPIRATION", "10"))

@@ -50,6 +50,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 from pipeline.generator import CHOOSABLE_FORMATS
 
@@ -230,7 +231,8 @@ class DecisionAgent:
     def judge(self, article: dict, account: dict) -> dict:
         """Call Claude for the judgment subscores. Returns a dict with relevance,
         reaction_potential, angle, reasoning. Defensive against bad JSON."""
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "decision",
+            
             model=self.model,
             max_tokens=400,
             system=SYSTEM_PROMPT,

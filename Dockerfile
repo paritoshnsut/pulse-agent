@@ -21,6 +21,7 @@ COPY --from=frontend /fe/dist ./frontend/dist
 
 ENV DB_PATH=/data/agent.db \
     CARDS_DIR=/data/cards \
+    BACKUPS_DIR=/data/backups \
     SCHEDULER_IN_APP=1 \
     PYTHONUNBUFFERED=1
 

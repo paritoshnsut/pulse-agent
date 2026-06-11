@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory, poster
 from pipeline.context import extract_keywords
 from pipeline.generator import ContentGenerator
@@ -117,7 +118,8 @@ class CallbackWatcher:
         )
 
     def verify(self, pred: dict, candidates: list[dict]) -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "callbacks",
+            
             model=self.model, max_tokens=250,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": self._build_prompt(pred, candidates)}],
@@ -163,11 +165,14 @@ class CallbackWatcher:
             f"-> prediction {word}."
         )
         gen = ContentGenerator(client=self._client, model=self.model)
+        from pipeline.grounding import GroundingChecker
+        grounding = (GroundingChecker(client=self._client, model=self.model)
+                     if settings.grounding_enabled else None)
         draft = gen.generate_checked(
             signal, genome, fmt="callback", scorer=PersonaConsistencyScorer(
                 client=self._client, model=self.model) if self._client else PersonaConsistencyScorer(),
             account_id=account["id"], persist=True, db_path=self.db_path,
-            context=context,
+            context=context, grounding=grounding,
         )
         if draft.get("post_id"):
             poster.TelegramNotifier().notify_draft(

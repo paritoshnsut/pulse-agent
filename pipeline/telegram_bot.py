@@ -163,8 +163,11 @@ class TelegramCommander:
                 memory.record_engagement(pid, likes=likes, retweets=rts,
                                          replies=reps, views=views,
                                          db_path=self.db_path)
-                return (f"📈 #{pid}: {likes} likes, {rts} RTs, {reps} replies logged. "
-                        f"historical_perf will pick it up.")
+                from style.corpus import file_posted_draft
+                filed = file_posted_draft(pid, db_path=self.db_path)
+                return (f"📈 #{pid}: {likes} likes, {rts} RTs, {reps} replies logged."
+                        + (" Filed into your voice corpus 🧬" if filed else "")
+                        + " historical_perf will pick it up.")
 
             if cmd == "evergreen":
                 accounts = memory.list_active_accounts(db_path=self.db_path)

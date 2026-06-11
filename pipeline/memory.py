@@ -834,6 +834,75 @@ def get_post_engagement(account_id: int, db_path: Optional[str] = None) -> list[
 
 
 # --------------------------------------------------------------------------- #
+# Claude cost ledger + backups
+# --------------------------------------------------------------------------- #
+def log_claude_call(module: str, model: Optional[str], input_tokens: int,
+                    output_tokens: int, cost_usd: float,
+                    db_path: Optional[str] = None) -> None:
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """INSERT INTO claude_logs
+               (module, model, input_tokens, output_tokens, cost_usd, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (module, model, input_tokens, output_tokens, cost_usd, _now()),
+        )
+
+
+def cost_today(db_path: Optional[str] = None) -> float:
+    """Total estimated Claude spend since UTC midnight."""
+    midnight = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) AS c FROM claude_logs WHERE created_at >= ?",
+            (midnight,),
+        ).fetchone()
+        return round(row["c"], 4)
+
+
+def backup_db(db_path: Optional[str] = None, out_dir: Optional[str] = None,
+              keep: Optional[int] = None) -> str:
+    """Consistent snapshot via VACUUM INTO; prunes oldest past `keep`.
+    The whole moat is one SQLite file — this is the insurance."""
+    src = db_path or settings.db_path
+    out = Path(out_dir or settings.backups_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    dest = out / f"agent-{stamp}.db"
+    conn = sqlite3.connect(src)
+    try:
+        conn.execute(f"VACUUM INTO '{dest.as_posix()}'")
+    finally:
+        conn.close()
+    backups = sorted(out.glob("agent-*.db"))
+    for old in backups[: max(0, len(backups) - (keep or settings.backup_keep))]:
+        old.unlink(missing_ok=True)
+    return str(dest)
+
+
+def touch_voice_sample_engagement(account_id: int, content: str, likes: int,
+                                  retweets: int, replies: int,
+                                  db_path: Optional[str] = None) -> None:
+    """Update analytics on an existing corpus sample (re-/perf on a draft
+    that's already been filed by the flywheel)."""
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """UPDATE voice_samples SET likes = ?, retweets = ?, replies = ?
+               WHERE account_id = ? AND content_hash = ?""",
+            (likes, retweets, replies, account_id, _content_hash(content)),
+        )
+
+
+def get_engagement_for_post(post_id: int, db_path: Optional[str] = None) -> Optional[dict]:
+    """Latest engagement snapshot for one post."""
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM engagement WHERE post_id = ? ORDER BY id DESC LIMIT 1",
+            (post_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# --------------------------------------------------------------------------- #
 # KV store (process state that must survive restarts)
 # --------------------------------------------------------------------------- #
 def kv_get(key: str, default: Optional[str] = None,

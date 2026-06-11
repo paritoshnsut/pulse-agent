@@ -76,6 +76,11 @@ automated (optional), because Telegram supports bot posting natively.
 | **Voice corpus** (persistent, daily-fed training set) | `style/corpus.py` + `voice_samples` | ✅ **new** — engagement-weighted selection |
 | **Genome A v2** (cadence/punctuation/openers + sentiment depth) | `style/dna.py` | ✅ **new** |
 | **Corpus suggestions** (from polled feeds, human-gated) | `style/corpus.py` + web Settings | ✅ **new** — never auto-added |
+| **Grounding shield** (claims vs source, pre-review) | `pipeline/grounding.py` | ✅ **new** — flags, never censors |
+| **Cost ledger + daily budget guard** | `pipeline/llm.py` + `claude_logs` | ✅ **new** — hard stop + one alert/day |
+| **Corpus flywheel** (posted+measured drafts train the voice) | `style/corpus.py` | ✅ **new** |
+| **Daily backups** (VACUUM INTO, rotated) | `memory.backup_db` + scheduler | ✅ **new** |
+| **Draft staleness warnings** | `pipeline/poster.py` + web | ✅ **new** |
 | Web app — React + Vite + Tailwind | `frontend/` + `api/main.py` | ✅ — FastAPI serves the built app |
 | **Supabase auth** (per-user personas, email allowlist) | `api/main.py` | ✅ **new** — JWTs verified locally |
 | Single-container deployment | `Dockerfile` (multi-stage) + `docker-compose.yml` | ✅ — one service runs everything |
@@ -342,6 +347,36 @@ normal review lane: "I called this" on a win, "I got this wrong" on a miss
 article is judged at most once, and predictions expire after
 `CALLBACK_EXPIRE_DAYS` (180) so the watcher never grinds on dead claims.
 Run by hand: `python -m pipeline.callbacks`.
+
+## The robustness layer
+
+**Grounding shield** (`pipeline/grounding.py`): one cheap Claude call per
+surviving draft checks every factual claim (numbers, quotes, attributions,
+events) against the source material the model was actually given. Unsupported
+claims are listed in the draft's metadata, force `needs_review`, and shout in
+both the Telegram alert and the web card: "🚨 verify before posting". Honest
+scope: this verifies GROUNDEDNESS, not truth — no vector DB pretends
+otherwise. Opinions and predictions framed as your own bet are not claims.
+If the auditor itself fails, the draft proceeds (every draft gets human
+review anyway) with the failure logged.
+
+**Cost ledger + budget guard** (`pipeline/llm.py`): every Claude call in the
+system flows through one wrapper that logs module/model/tokens/estimated cost
+to `claude_logs` and refuses calls once today's spend crosses
+`DAILY_BUDGET_USD` (default $5) — one Telegram alert per day, watchers keep
+ingesting for free, drafting resumes at UTC midnight. Spend shows in
+/api/status and the morning briefing.
+
+**Corpus flywheel**: when you log /perf on a posted draft, its text + numbers
+auto-file into the voice corpus (origin `approved_draft`) — it was
+human-approved at posting time, so no gate is skipped. The system trains on
+its own audience-validated output; re-logging /perf updates the numbers.
+
+**Backups**: daily `VACUUM INTO` snapshot of the SQLite brain to
+`BACKUPS_DIR` (on the /data volume in Docker), keeping the last
+`BACKUP_KEEP` (7). **Staleness**: drafts older than `DRAFT_STALE_HOURS` (24)
+warn "the moment may have passed" in Telegram and show a red age chip on the
+web review card.
 
 ## The intelligence layer (CLAUDE.md's 12, scored honestly)
 

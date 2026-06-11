@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from config import settings
+from pipeline.llm import tracked_create
 from pipeline import memory
 from style import dna
 
@@ -260,7 +261,8 @@ class ReviewLearner:
         )
 
     def judge(self, pos: list[dict], neg: list[dict], stats: dict) -> dict:
-        msg = self.client.messages.create(
+        msg = tracked_create(self.client, "learning",
+            
             model=self.model,
             max_tokens=500,
             system=SYSTEM_PROMPT,
