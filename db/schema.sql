@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS voice_samples (
     content      TEXT NOT NULL,
     content_hash TEXT NOT NULL,                 -- dedup key (per account)
     origin       TEXT,                          -- manual | article:<id> | url
+    source       TEXT,                          -- outlet/author, for diversity cap
     likes        INTEGER,                       -- optional analytics
     retweets     INTEGER,
     replies      INTEGER,

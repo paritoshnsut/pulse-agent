@@ -94,6 +94,24 @@ measurable patterns it can key on.
 
 ---
 
+## Full async (aiohttp) rewrite of the watchers
+
+**Idea (Gemini):** replace `requests`/`feedparser` blocking calls in every
+watcher with `aiohttp`, offload heavy scans to an explicit ThreadPoolExecutor,
+to avoid GIL/thread-pool exhaustion under concurrent ingestion.
+
+**Why parked:** premature at two users. APScheduler already runs each job on
+its own thread (we bumped the pool to 20 + misfire grace), and the Anthropic
+SDK releases the GIL during the I/O wait — a 45s generation does not freeze
+the watchers. The two real wins from this critique we DID take: parallel RSS
+fetch (bounded thread pool) and the SQLite `busy_timeout` that absorbs write
+contention. A full async rewrite is a large change for marginal benefit.
+
+**Build trigger:** real concurrency pain — many personas, or ingestion volume
+where the thread pool measurably backs up. Then move watchers to async and/or
+split the scheduler into its own container (pairs with the Postgres+queue
+migration below).
+
 ## Smaller parked items
 
 - **Dynamic Genome A/B blend per topic/time** — data-starved; revisit after

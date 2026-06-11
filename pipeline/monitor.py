@@ -20,6 +20,7 @@ Design choices that matter:
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from time import mktime
 from typing import Any, Iterable, Optional
@@ -118,25 +119,38 @@ class NewsMonitor:
             )
         return out
 
+    def _fetch_one(self, spec: dict) -> list[dict]:
+        """Fetch + parse a single feed. Per-feed failures are isolated."""
+        url = spec["url"]
+        try:
+            parsed = feedparser.parse(url, agent=USER_AGENT)
+            if parsed.bozo and not parsed.entries:
+                logger.warning("RSS parse issue for %s: %s", url, parsed.bozo_exception)
+                return []
+            got = self.parse_rss_entries(
+                parsed, vertical=spec.get("vertical"),
+                region=spec.get("region"), source_name=spec.get("name"),
+            )
+            logger.info("RSS [%s/%s] %s -> %d entries",
+                        spec.get("vertical"), spec.get("region"), url, len(got))
+            return got
+        except Exception as exc:  # noqa: BLE001 — isolate per-feed failure
+            logger.error("RSS fetch failed for %s: %s", url, exc)
+            return []
+
     def fetch_rss(self) -> list[dict]:
-        """Fetch every configured feed. Bad feeds are skipped, not fatal."""
+        """Fetch every configured feed, concurrently. 65 feeds fetched
+        sequentially is minutes of mostly-idle network wait; a bounded thread
+        pool cuts it to seconds. Threads are the right tool here — feedparser
+        blocks on I/O (releasing the GIL), and this stays off the event loop so
+        the web request handling the user is never blocked behind ingestion."""
+        if not self.feeds:
+            return []
+        workers = min(settings.feed_fetch_workers, len(self.feeds))
         articles: list[dict] = []
-        for spec in self.feeds:
-            url = spec["url"]
-            try:
-                parsed = feedparser.parse(url, agent=USER_AGENT)
-                if parsed.bozo and not parsed.entries:
-                    logger.warning("RSS parse issue for %s: %s", url, parsed.bozo_exception)
-                    continue
-                got = self.parse_rss_entries(
-                    parsed, vertical=spec.get("vertical"),
-                    region=spec.get("region"), source_name=spec.get("name"),
-                )
-                logger.info("RSS [%s/%s] %s -> %d entries",
-                            spec.get("vertical"), spec.get("region"), url, len(got))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for got in pool.map(self._fetch_one, self.feeds):
                 articles.extend(got)
-            except Exception as exc:  # noqa: BLE001 — isolate per-feed failure
-                logger.error("RSS fetch failed for %s: %s", url, exc)
         return articles
 
     def health_check(self) -> list[dict]:

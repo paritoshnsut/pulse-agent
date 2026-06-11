@@ -32,6 +32,13 @@ class Settings:
     # --- Storage ---
     db_path: str = os.getenv("DB_PATH", str(PROJECT_ROOT / "agent.db"))
     schema_path: str = str(PROJECT_ROOT / "db" / "schema.sql")
+    # How long a write waits for a competing write before giving up. The single
+    # container shares one SQLite file across web/API/watchers/telegram; this is
+    # the queue that prevents 'database is locked' under concurrency.
+    db_busy_timeout_s: float = float(os.getenv("DB_BUSY_TIMEOUT_S", "30"))
+    # Concurrency for the RSS fetch fan-out (65 feeds sequentially is slow;
+    # these are I/O-bound so threads are the right tool).
+    feed_fetch_workers: int = int(os.getenv("FEED_FETCH_WORKERS", "12"))
 
     # --- Signal scoring weights (must sum to 1.0). Evolved from CLAUDE.md's
     # 5-factor model: corroboration (coverage breadth across our own feeds)
@@ -183,6 +190,9 @@ class Settings:
     corpus_max_own: int = int(os.getenv("CORPUS_MAX_OWN", "300"))
     corpus_max_inspiration: int = int(os.getenv("CORPUS_MAX_INSPIRATION", "10"))
     corpus_suggest_max: int = int(os.getenv("CORPUS_SUGGEST_MAX", "5"))
+    # Anti-overfit: no single outlet/author may exceed this fraction of the
+    # inspiration training set, so one columnist can't warp `influences`.
+    corpus_source_cap_fraction: float = float(os.getenv("CORPUS_SOURCE_CAP_FRACTION", "0.5"))
 
     # --- Audience fatigue detector: don't draft the Nth take on one topic ---
     fatigue_window_hours: int = int(os.getenv("FATIGUE_WINDOW_HOURS", "72"))

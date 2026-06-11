@@ -25,10 +25,23 @@ def _now() -> str:
 
 @contextmanager
 def get_conn(db_path: Optional[str] = None) -> Iterator[sqlite3.Connection]:
-    """Connection context manager with dict-like rows and FK enforcement."""
-    conn = sqlite3.connect(db_path or settings.db_path)
+    """Connection context manager with dict-like rows and FK enforcement.
+
+    Concurrency posture (single-container: web + API + watchers + telegram all
+    share one SQLite file). WAL is already on (set persistently in schema.sql),
+    so readers never block the writer. The piece that matters per-connection is
+    busy_timeout: without it a write that collides with another write throws
+    'database is locked' immediately; with it, the transaction waits and
+    (because we never hold a write open across a Claude call — generation
+    happens outside the connection) almost always wins. synchronous=NORMAL is
+    the safe, fast pairing with WAL.
+    """
+    conn = sqlite3.connect(db_path or settings.db_path,
+                           timeout=settings.db_busy_timeout_s)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(f"PRAGMA busy_timeout = {int(settings.db_busy_timeout_s * 1000)}")
+    conn.execute("PRAGMA synchronous = NORMAL")
     try:
         yield conn
         conn.commit()
@@ -66,6 +79,9 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     pred_cols = {r["name"] for r in conn.execute("PRAGMA table_info(predictions_tracker)")}
     if pred_cols and "last_checked_at" not in pred_cols:
         conn.execute("ALTER TABLE predictions_tracker ADD COLUMN last_checked_at TEXT")
+    vs_cols = {r["name"] for r in conn.execute("PRAGMA table_info(voice_samples)")}
+    if vs_cols and "source" not in vs_cols:
+        conn.execute("ALTER TABLE voice_samples ADD COLUMN source TEXT")
 
 
 def init_db(db_path: Optional[str] = None, schema_path: Optional[str] = None) -> None:
@@ -352,13 +368,14 @@ def add_voice_samples(account_id: int, items: list[dict],
                 continue
             cur = conn.execute(
                 """INSERT INTO voice_samples
-                   (account_id, kind, content, content_hash, origin,
+                   (account_id, kind, content, content_hash, origin, source,
                     likes, retweets, replies, active, added_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                    ON CONFLICT(account_id, content_hash) DO NOTHING""",
                 (account_id, it.get("kind") or "own", content,
                  _content_hash(content), it.get("origin") or "manual",
-                 it.get("likes"), it.get("retweets"), it.get("replies"), _now()),
+                 it.get("source"), it.get("likes"), it.get("retweets"),
+                 it.get("replies"), _now()),
             )
             added += int(bool(cur.rowcount))
             dup += int(not cur.rowcount)

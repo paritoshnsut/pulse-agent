@@ -88,6 +88,28 @@ def select_training_set(samples: list[dict], cap: int) -> list[dict]:
     return chosen
 
 
+def diversify_by_source(samples: list[dict], limit: int,
+                        cap_fraction: float) -> list[dict]:
+    """Cap any single source (outlet/author) to cap_fraction of the result, so
+    a flood of editorials from one columnist during a big-news week can't warp
+    `influences`. Caller passes newest-first; this preserves that order and
+    fills up to `limit`. Falls back to origin when no source is recorded."""
+    if not samples or limit <= 0:
+        return []
+    per_source = max(1, int(limit * cap_fraction))
+    counts: dict[str, int] = {}
+    chosen: list[dict] = []
+    for s in samples:
+        key = (s.get("source") or s.get("origin") or "unknown").strip().lower()
+        if counts.get(key, 0) >= per_source:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        chosen.append(s)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
 def file_posted_draft(post_id: int, db_path: Optional[str] = None) -> bool:
     """The flywheel: a POSTED draft with measured engagement is, by
     definition, an audience-validated sample of your own published voice —
@@ -151,9 +173,13 @@ class CorpusManager:
             raise ValueError(f"Corpus has only {len(own)} of your own posts — "
                              "add at least 5 (50-200 is ideal) before training.")
         chosen = select_training_set(own, settings.corpus_max_own)
-        inspiration = [s["content"] for s in memory.get_voice_samples(
-            account_id, kind="inspiration", db_path=self.db_path)]
-        inspiration = inspiration[-settings.corpus_max_inspiration:]
+        # inspiration: newest-first, then capped so no single outlet dominates
+        insp_samples = list(reversed(memory.get_voice_samples(
+            account_id, kind="inspiration", db_path=self.db_path)))
+        insp_samples = diversify_by_source(
+            insp_samples, settings.corpus_max_inspiration,
+            settings.corpus_source_cap_fraction)
+        inspiration = [s["content"] for s in insp_samples]
 
         extractor = StyleDNAExtractor(client=self._client, model=self.model)
         genome_a = extractor.extract([s["content"] for s in chosen],
@@ -218,7 +244,8 @@ class CorpusManager:
             sug.get("title"), sug.get("description"), sug.get("content")]))[:4000]
         result = memory.add_voice_samples(
             account_id, [{"content": content, "kind": "inspiration",
-                          "origin": f"article:{sug['article_id']}"}],
+                          "origin": f"article:{sug['article_id']}",
+                          "source": sug.get("source_name")}],
             db_path=self.db_path)
         memory.set_suggestion_status(suggestion_id, "accepted", db_path=self.db_path)
         return result

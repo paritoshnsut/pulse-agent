@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **261 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **269 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -183,6 +183,16 @@ code-switching,** and `influences` distilled from admired writing.
 All guards **flag, never block** (you review everything) and are **fail-safe**
 (a broken check lets the draft through, logged).
 
+### Operational resilience (Gemini-prompted hardening)
+
+| Hardening | Status | Notes |
+|---|---|---|
+| SQLite `busy_timeout` + `synchronous=NORMAL` | ✅ | WAL already persistent; the timeout queues colliding writes instead of `database is locked` under the single-container concurrency |
+| Parallel RSS fetch (bounded thread pool) | ✅ | 65 feeds fetched concurrently — seconds, not minutes; failures isolated per feed |
+| Scheduler executor sizing + misfire grace | ✅ | 20-worker pool so a 45s Claude block never starves the watchers; missed ticks within 5 min still run |
+| Corpus source-diversity cap | ✅ | no single outlet/author exceeds `CORPUS_SOURCE_CAP_FRACTION` (0.5) of the inspiration set — anti-overfit on `influences` |
+| Full async (`aiohttp`) rewrite of all watchers | ⏸ | premature for two users; APScheduler already thread-isolates and the SDK releases the GIL on I/O. See `DEFERRED.md`. |
+
 ---
 
 ## SaaS / productization layer
@@ -257,7 +267,7 @@ style/      dna corpus crowd learning scorer
 watch/      youtube reddit trends twitter(stub)
 image/      cards
 api/        main.py (+ static fallback)         frontend/  React app
-db/         schema.sql                          tests/     261 tests
+db/         schema.sql                          tests/     269 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
 ```
 

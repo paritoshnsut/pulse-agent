@@ -36,8 +36,16 @@ import argparse
 import logging
 import sys
 
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
+
+# Roomy enough that a long process cycle (45s Claude blocks) never starves the
+# watchers; each job is still max_instances=1 so nothing stacks on itself.
+_EXECUTORS = {"default": ThreadPoolExecutor(max_workers=20)}
+# A job whose tick is missed (slow predecessor, sleeping host) still runs if
+# it's within this window, instead of being silently dropped.
+_JOB_DEFAULTS = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 300}
 
 from config import settings
 from pipeline import fatigue, memory, poster
@@ -332,10 +340,10 @@ def start_background() -> BackgroundScheduler:
     """Same job set as start(), but on a BackgroundScheduler — used by the web
     app (api/main.py) so one deployed process runs watchers + brain + UI."""
     memory.init_db()
-    sched = BackgroundScheduler(timezone="UTC")
+    sched = BackgroundScheduler(timezone="UTC", executors=_EXECUTORS,
+                                job_defaults=_JOB_DEFAULTS)
     for name, fn, minutes in JOBS:
-        sched.add_job(fn, "interval", minutes=minutes, id=name,
-                      max_instances=1, coalesce=True)
+        sched.add_job(fn, "interval", minutes=minutes, id=name)
     bh, bm = _briefing_utc()
     sched.add_job(job_briefing, "cron", hour=bh, minute=bm, id="briefing")
     sched.add_job(job_process, "date", id="process_boot")
@@ -349,10 +357,10 @@ def start():
     memory.init_db()
     if not memory.list_active_accounts():
         logger.warning("No accounts yet. Run `python scheduler.py --seed` first.")
-    sched = BlockingScheduler(timezone="UTC")
+    sched = BlockingScheduler(timezone="UTC", executors=_EXECUTORS,
+                              job_defaults=_JOB_DEFAULTS)
     for name, fn, minutes in JOBS:
-        sched.add_job(fn, "interval", minutes=minutes, id=name,
-                      max_instances=1, coalesce=True, next_run_time=None)
+        sched.add_job(fn, "interval", minutes=minutes, id=name)
         logger.info("scheduled '%s' every %d min", name, minutes)
     # daily briefing at the configured local hour (converted to UTC)
     bh, bm = _briefing_utc()
