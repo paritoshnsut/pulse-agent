@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
-import { TEMPLATES, SIZE } from "./templates.mjs";
+import { TEMPLATES, TEMPLATE_SIZES, SIZE } from "./templates.mjs";
 
 const require = createRequire(import.meta.url);
 const PORT = parseInt(process.env.VISUALS_PORT || "8787", 10);
@@ -38,12 +38,13 @@ const FONTS = [
 async function renderPNG(template, data, brand) {
   const build = TEMPLATES[template];
   if (!build) throw new Error(`unknown template '${template}'`);
+  const size = TEMPLATE_SIZES[template] || SIZE;  // carousels are square
   const svg = await satori(build(data || {}, brand || {}), {
-    ...SIZE,
+    ...size,
     fonts: FONTS,
   });
   const png = new Resvg(svg, {
-    fitTo: { mode: "width", value: SIZE.width },
+    fitTo: { mode: "width", value: size.width },
   }).render().asPng();
   return png;
 }

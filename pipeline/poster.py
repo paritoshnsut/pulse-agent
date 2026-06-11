@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import quote
 
@@ -274,10 +275,23 @@ def dispatch_approved(post: dict, notifier: Optional[TelegramNotifier] = None,
     notifier = notifier or TelegramNotifier()
     parts = postable_texts(post)
     card = make_card(post, db_path=db_path)
+    # carousels render multiple slides — send each so they're all saveable
+    slides = []
+    if card:
+        fresh = memory.get_post(post["id"], db_path=db_path) or {}
+        slides = (fresh.get("meta_json") or {}).get("visual_slides") or []
     card_sent = False
     if card and notifier.configured:
-        card_sent = notifier.send_photo(
-            card, caption=f"card for draft #{post['id']} — attach it when composing")
+        if slides:
+            vdir = Path(card).parent
+            for i, name in enumerate(slides, 1):
+                card_sent = notifier.send_photo(
+                    str(vdir / name),
+                    caption=f"#{post['id']} slide {i}/{len(slides)} — save all, "
+                            "post as a carousel") or card_sent
+        else:
+            card_sent = notifier.send_photo(
+                card, caption=f"card for draft #{post['id']} — attach it when composing")
     return {
         "texts": parts,
         "intent_urls": [x_intent_url(t) for t in parts],

@@ -428,14 +428,19 @@ def approve(post_id: int, user: dict = Depends(require_auth)):
     result = poster.dispatch_approved(post, db_path=_db())
     card = result.get("card")
     card_url = None
+    visual_urls: list[str] = []
     if card:
         # visuals (Satori) and cards (Pillow fallback) live on different mounts
         mount = "visuals" if Path(card).parent == Path(settings.visuals_dir) else "cards"
         card_url = f"/{mount}/{Path(card).name}"
+        fresh = memory.get_post(post_id, db_path=_db()) or {}
+        slides = (fresh.get("meta_json") or {}).get("visual_slides") or []
+        visual_urls = [f"/visuals/{n}" for n in slides] or [card_url]
     return {
         "texts": result["texts"],
         "intent_urls": result["intent_urls"],
         "card_url": card_url,
+        "visual_urls": visual_urls,
         "timing": _safe_timing(post.get("account_id")),
     }
 

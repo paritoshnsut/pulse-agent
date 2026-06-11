@@ -89,6 +89,68 @@ def brand_payload(account: dict, kit: Optional[dict]) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Carousel splitting (pure function)
+# --------------------------------------------------------------------------- #
+CAROUSEL_FORMATS = ("thread", "linkedin_post", "newsletter")
+
+
+def split_into_slides(post: dict, kit: Optional[dict] = None) -> Optional[dict]:
+    """Break a multi-idea post into carousel slides:
+    {"cover": hook, "slides": [body...], "cta": {cta_text, cta_url}} — or None
+    when the content is too thin to deserve a carousel (single card instead).
+
+    Threads map naturally: tweet 1 is the cover, the rest are slides.
+    Long-form (linkedin_post/newsletter): first paragraph (or its first
+    sentence, if huge) is the cover; remaining paragraphs are greedily packed
+    into slides under the per-slide character budget.
+    """
+    meta = post.get("meta_json") or {}
+    tweets = [_strip_hashtags(t) for t in (meta.get("tweets") or []) if t.strip()]
+
+    if tweets:
+        if len(tweets) < 2:
+            return None
+        cover, slides = tweets[0], tweets[1:]
+    else:
+        paras = [p.strip() for p in re.split(r"\n{2,}|\n", post["content"])
+                 if p.strip()]
+        paras = [_strip_hashtags(p) for p in paras if _strip_hashtags(p)]
+        if len(paras) < 2 or len(post["content"]) < 350:
+            return None
+        cover = paras[0]
+        if len(cover) > 160:  # huge opener: hook = its first sentence
+            first = re.split(r"(?<=[.!?])\s+", cover, maxsplit=1)
+            if len(first) == 2:
+                cover, rest = first[0], first[1]
+                paras = [rest] + paras[1:]
+            else:
+                paras = paras[1:]
+        else:
+            paras = paras[1:]
+        # greedy pack paragraphs into slides under the budget
+        budget = settings.carousel_slide_chars
+        slides: list[str] = []
+        current = ""
+        for p in paras:
+            if current and len(current) + len(p) + 2 > budget:
+                slides.append(current)
+                current = p
+            else:
+                current = f"{current}\n\n{p}".strip()
+        if current:
+            slides.append(current)
+    slides = slides[: settings.carousel_max_slides]
+    if not slides:
+        return None
+    return {
+        "cover": cover,
+        "slides": slides,
+        "cta": {"cta_text": (kit or {}).get("cta_text"),
+                "cta_url": (kit or {}).get("cta_url")},
+    }
+
+
+# --------------------------------------------------------------------------- #
 # The render service lifecycle
 # --------------------------------------------------------------------------- #
 def _health_url() -> str:
@@ -180,10 +242,53 @@ class PillowRenderer:
 # --------------------------------------------------------------------------- #
 # The public entry point
 # --------------------------------------------------------------------------- #
+def _save(png: bytes, name: str) -> Path:
+    out_dir = Path(settings.visuals_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / name
+    path.write_bytes(png)
+    return path
+
+
+def generate_carousel(post: dict, account: dict, kit: Optional[dict],
+                      renderer, db_path: Optional[str] = None) -> Optional[str]:
+    """Render cover + content slides + CTA as separate square PNGs. Records
+    every slide in post meta (visual_slides) and returns the cover's path.
+    Any slide failing -> the whole carousel is abandoned (caller falls back
+    to a single card) — a half-carousel is worse than none."""
+    pack = split_into_slides(post, kit)
+    if not pack:
+        return None
+    brand = brand_payload(account, kit)
+    total = len(pack["slides"]) + 2  # cover + content + cta
+    jobs = [("carousel_cover", {"text": pack["cover"], "total": total})]
+    jobs += [("carousel_slide", {"text": s, "index": i + 2, "total": total})
+             for i, s in enumerate(pack["slides"])]
+    jobs.append(("carousel_cta", {**pack["cta"], "index": total, "total": total}))
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    names: list[str] = []
+    for n, (template, data) in enumerate(jobs, 1):
+        png = renderer.render(template, data, brand)
+        if png is None:
+            logger.warning("Carousel slide %d/%d failed — falling back to a "
+                           "single card.", n, total)
+            return None
+        names.append(_save(png, f"post{post['id']}-{stamp}-slide{n}.png").name)
+
+    memory.update_post_meta(post["id"], {"visual": names[0],
+                                         "visual_slides": names},
+                            db_path=db_path)
+    logger.info("Carousel for #%d: %d slides.", post["id"], total)
+    return str(Path(settings.visuals_dir) / names[0])
+
+
 def generate_for_post(post_id: int, db_path: Optional[str] = None,
                       renderer=None) -> Optional[str]:
-    """Render the branded visual for a post; saves PNG into visuals_dir and
-    returns its filesystem path (None when disabled/failed — never raises)."""
+    """Render the branded visual for a post; saves PNG(s) into visuals_dir and
+    returns the (cover) path (None when disabled/failed — never raises).
+    Multi-idea formats (thread / linkedin_post / newsletter) become square
+    carousels; everything else gets a single 16:9 card."""
     if not settings.visuals_enabled:
         return None
     post = memory.get_post(post_id, db_path=db_path)
@@ -192,10 +297,15 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
     account = memory.get_account(post["account_id"], db_path=db_path) or {}
     kit = memory.get_brand_kit(post["account_id"], db_path=db_path)
 
+    r = renderer or SatoriRenderer()
+
+    if (post.get("format") or "") in CAROUSEL_FORMATS:
+        cover = generate_carousel(post, account, kit, r, db_path=db_path)
+        if cover:
+            return cover  # carousel done; otherwise fall through to a card
+
     template, data = choose_template(post)
     brand = brand_payload(account, kit)
-
-    r = renderer or SatoriRenderer()
     png = r.render(template, data, brand)
     used = template
     if png is None:
@@ -204,11 +314,8 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
     if png is None:
         return None
 
-    out_dir = Path(settings.visuals_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    path = out_dir / f"post{post_id}-{stamp}.png"
-    path.write_bytes(png)
+    path = _save(png, f"post{post_id}-{stamp}.png")
     memory.update_post_meta(post_id, {"visual": path.name}, db_path=db_path)
     logger.info("Visual for #%d: %s via %s", post_id, path.name, used)
     return str(path)

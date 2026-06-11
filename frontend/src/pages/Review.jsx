@@ -159,7 +159,22 @@ function DraftCard({ p, refresh }) {
               </div>
             </div>
           ))}
-          {pkg.card_url && (
+          {(pkg.visual_urls?.length > 1) ? (
+            <div>
+              <div className="text-sm text-zinc-400 mb-1">
+                🎠 carousel — {pkg.visual_urls.length} slides (download all, post in order):
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {pkg.visual_urls.map((u, i) => (
+                  <a key={u} href={u} download className="shrink-0 text-center">
+                    <img src={u} alt={`slide ${i + 1}`}
+                         className="rounded-lg border border-zinc-800 h-40 w-40 object-cover" />
+                    <div className="text-xs text-sky-400 mt-1">slide {i + 1} ↓</div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : pkg.card_url && (
             <div>
               <img src={pkg.card_url} alt="post card"
                    className="rounded-xl border border-zinc-800 max-w-md w-full" />

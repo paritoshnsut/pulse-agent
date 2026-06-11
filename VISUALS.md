@@ -60,7 +60,7 @@ brain; visuals are the multiplier.
 
 | Item | Status |
 |---|---|
-| **Carousel** template: cover + N content slides + CTA slide (multi-PNG per post; thread/linkedin_post map to it) | ⏳ |
+| **Carousel**: square (1080×1080) cover + N content slides + CTA closer; threads map tweet-per-slide, long-form packs paragraphs under a per-slide budget; cover hook auto-extracted (first sentence of huge openers); thin content falls back to a single card, as does any slide-render failure (no half-carousels). All slides pushed to Telegram individually + downloadable strip in web review. | ✅ |
 | Logo image rendering (data-URL embed into Satori; logo upload stored on /data) | ⏳ |
 | Per-preset visual defaults (SaaS = clean blue/sans, D2C = warm, …) | ⏳ |
 | Live template preview in web Settings (see the look while editing the kit) | ⏳ |

@@ -6,7 +6,8 @@
 // where brand carries accent/secondary colors, bg style, font family and
 // watermark from the account's brand kit, with tasteful defaults when unset.
 
-const SIZE = { width: 1200, height: 675 }; // 16:9, X/LinkedIn friendly
+const SIZE = { width: 1200, height: 675 };      // 16:9 — single cards (X/LinkedIn)
+const SQUARE = { width: 1080, height: 1080 };   // 1:1 — carousel slides (LinkedIn/IG)
 
 const DEFAULTS = {
   accent: "#4da3ff",
@@ -123,10 +124,97 @@ export function insightCard(data, brand) {
   ]);
 }
 
+// ------------------------------------------------------- carousel slides
+// Square multi-slide format: cover (the hook + swipe cue) -> content slides
+// (numbered, one idea each) -> CTA closer. Python orchestrates the sequence;
+// each render call produces one slide.
+
+function slideCounter(t, index, total) {
+  return el("div", {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+  }, [
+    accentBar(t),
+    el("div", { fontSize: 26, color: t.muted, display: "flex" },
+      total ? `${index}/${total}` : " "),
+  ]);
+}
+
+export function carouselCover(data, brand) {
+  const t = theme(brand);
+  const text = data.text || "";
+  return el("div", {
+    width: "100%", height: "100%", display: "flex", flexDirection: "column",
+    background: t.background, color: t.fg, fontFamily: t.font,
+    padding: "72px", justifyContent: "space-between",
+  }, [
+    slideCounter(t, 1, data.total),
+    el("div", {
+      fontSize: fitFontSize(text, 72, 38), fontWeight: 700, lineHeight: 1.2,
+      display: "flex", flexGrow: 1, alignItems: "center",
+    }, text),
+    el("div", { display: "flex", justifyContent: "space-between", alignItems: "center" }, [
+      t.handle
+        ? el("div", { fontSize: 28, fontWeight: 700, color: t.accent, display: "flex" },
+            `@${t.handle.replace(/^@/, "")}`)
+        : el("div", { display: "flex" }),
+      el("div", { fontSize: 28, color: t.muted, display: "flex" }, "swipe →"),
+    ]),
+  ]);
+}
+
+export function carouselSlide(data, brand) {
+  const t = theme(brand);
+  const text = data.text || "";
+  return el("div", {
+    width: "100%", height: "100%", display: "flex", flexDirection: "column",
+    background: t.background, color: t.fg, fontFamily: t.font,
+    padding: "72px", justifyContent: "space-between",
+  }, [
+    slideCounter(t, data.index, data.total),
+    el("div", {
+      fontSize: fitFontSize(text, 52, 32), fontWeight: 600, lineHeight: 1.32,
+      display: "flex", flexGrow: 1, alignItems: "center",
+    }, text),
+    footer(t),
+  ]);
+}
+
+export function carouselCta(data, brand) {
+  const t = theme(brand);
+  const cta = data.cta_text
+    || (t.handle ? `Follow @${t.handle.replace(/^@/, "")} for more` : "Thanks for reading");
+  return el("div", {
+    width: "100%", height: "100%", display: "flex", flexDirection: "column",
+    background: t.background, color: t.fg, fontFamily: t.font,
+    padding: "72px", justifyContent: "space-between",
+  }, [
+    slideCounter(t, data.index, data.total),
+    el("div", { display: "flex", flexDirection: "column", flexGrow: 1, justifyContent: "center" }, [
+      el("div", {
+        fontSize: fitFontSize(cta, 64, 36), fontWeight: 700, lineHeight: 1.25,
+        color: t.fg, display: "flex",
+      }, cta),
+      data.cta_url ? el("div", {
+        fontSize: 34, color: t.accent, marginTop: 30, fontWeight: 700, display: "flex",
+      }, data.cta_url) : el("div", { display: "flex" }),
+    ]),
+    footer(t),
+  ]);
+}
+
 export const TEMPLATES = {
   quote_card: quoteCard,
   stat_highlight: statHighlight,
   insight_card: insightCard,
+  carousel_cover: carouselCover,
+  carousel_slide: carouselSlide,
+  carousel_cta: carouselCta,
+};
+
+export const TEMPLATE_SIZES = {
+  carousel_cover: SQUARE,
+  carousel_slide: SQUARE,
+  carousel_cta: SQUARE,
 };
 
 export { SIZE };

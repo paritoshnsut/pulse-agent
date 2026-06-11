@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **290 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **297 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -295,7 +295,7 @@ watch/      youtube reddit trends twitter(stub)
 image/      cards
 presets.py  onboarding starter packs            sources.py  65-feed catalog
 api/        main.py (+ static fallback)         frontend/  React app
-db/         schema.sql                          tests/     290 tests
+db/         schema.sql                          tests/     297 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
 ```
 

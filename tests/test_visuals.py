@@ -110,6 +110,100 @@ def test_brand_kit_visual_fields_roundtrip(temp_db):
     assert kit["font_family"] == "mono" and kit["logo_url"] == "https://x/logo.png"
 
 
+# ----------------------------------------------------------------- carousel
+def test_split_thread_into_slides():
+    post = _post("ignored", "thread",
+                 tweets=["The hook #tag", "point one", "point two", "point three"])
+    pack = visuals.split_into_slides(post, {"cta_text": "Try it", "cta_url": "x.co"})
+    assert pack["cover"] == "The hook"
+    assert pack["slides"] == ["point one", "point two", "point three"]
+    assert pack["cta"] == {"cta_text": "Try it", "cta_url": "x.co"}
+
+
+def test_split_longform_packs_paragraphs(monkeypatch):
+    patch_settings(monkeypatch, visuals, carousel_slide_chars=120,
+                   carousel_max_slides=6)
+    paras = ["A short hook line.",
+             "First idea explained in some detail here, with enough words that "
+             "the paragraph carries genuine substance for a slide.",
+             "Second idea, also explained at length right here, again with "
+             "enough body to make the slide worth swiping to.",
+             "Third idea rounds out the whole argument nicely and gives the "
+             "closing slide something concrete and memorable to land on."]
+    post = _post("\n\n".join(paras), "linkedin_post")
+    pack = visuals.split_into_slides(post, None)
+    assert pack["cover"] == "A short hook line."
+    assert len(pack["slides"]) >= 2                     # packed under budget
+    assert all(len(s) <= 120 + 60 for s in pack["slides"])
+    # everything survived the split
+    assert "Third idea" in " ".join(pack["slides"])
+
+
+def test_split_huge_opener_uses_first_sentence():
+    long_first = ("This is the very first sentence of a long opener. " +
+                  "And here is a great deal of follow-on detail " * 8).strip()
+    post = _post(long_first + "\n\nSecond paragraph here with plenty of words "
+                 "so the total clears the carousel-worthiness bar easily.",
+                 "linkedin_post")
+    pack = visuals.split_into_slides(post, None)
+    assert pack["cover"] == "This is the very first sentence of a long opener."
+    assert any("follow-on detail" in s for s in pack["slides"])
+
+
+def test_split_thin_content_returns_none():
+    assert visuals.split_into_slides(_post("too short", "linkedin_post"), None) is None
+    assert visuals.split_into_slides(
+        _post("x", "thread", tweets=["only one tweet"]), None) is None
+
+
+def test_carousel_renders_all_slides_and_records_meta(temp_db, tmp_path, monkeypatch):
+    patch_settings(monkeypatch, visuals, visuals_dir=str(tmp_path), visuals_enabled=True)
+    acct = memory.upsert_account(handle="me", db_path=temp_db)
+    memory.save_brand_kit(acct, {"cta_text": "Try it free"}, db_path=temp_db)
+    pid = memory.save_post(acct, "thread", "one\n\n———\n\ntwo\n\n———\n\nthree",
+                           meta={"tweets": ["The hook", "point one", "point two"]},
+                           db_path=temp_db)
+    calls = []
+
+    class FakeRenderer:
+        def render(self, template, data, brand):
+            calls.append((template, data))
+            return PNG_MAGIC + b"slide"
+
+    cover = visuals.generate_for_post(pid, db_path=temp_db, renderer=FakeRenderer())
+    # cover + 2 content + cta = 4 renders, in order
+    assert [c[0] for c in calls] == ["carousel_cover", "carousel_slide",
+                                     "carousel_slide", "carousel_cta"]
+    assert calls[0][1]["total"] == 4
+    assert calls[1][1]["index"] == 2
+    assert calls[3][1]["cta_text"] == "Try it free"
+    meta = memory.get_post(pid, db_path=temp_db)["meta_json"]
+    assert len(meta["visual_slides"]) == 4
+    assert meta["visual"] == meta["visual_slides"][0]
+    assert Path(cover).name == meta["visual_slides"][0]
+    assert all((tmp_path / n).exists() for n in meta["visual_slides"])
+
+
+def test_carousel_abandons_on_slide_failure_falls_back_to_card(temp_db, tmp_path, monkeypatch):
+    patch_settings(monkeypatch, visuals, visuals_dir=str(tmp_path), visuals_enabled=True)
+    acct = memory.upsert_account(handle="me", db_path=temp_db)
+    pid = memory.save_post(acct, "thread", "x",
+                           meta={"tweets": ["hook", "one", "two"]}, db_path=temp_db)
+
+    class FlakyRenderer:  # cover ok, slide 2 dies -> single-card path kicks in
+        n = 0
+        def render(self, template, data, brand):
+            FlakyRenderer.n += 1
+            if FlakyRenderer.n == 2:
+                return None
+            return PNG_MAGIC + b"x"
+
+    path = visuals.generate_for_post(pid, db_path=temp_db, renderer=FlakyRenderer())
+    assert path is not None                       # the single card still produced
+    meta = memory.get_post(pid, db_path=temp_db)["meta_json"]
+    assert "visual_slides" not in meta            # no half-carousel recorded
+
+
 # ------------------------------------------------------- real render smoke
 node_ready = (shutil.which("node") is not None
               and (Path(__file__).parent.parent / "render" / "node_modules" / "satori").exists())
@@ -125,3 +219,21 @@ def test_real_satori_render_end_to_end(temp_db, tmp_path, monkeypatch):
     path = visuals.generate_for_post(pid, db_path=temp_db)
     data = Path(path).read_bytes()
     assert data.startswith(PNG_MAGIC) and len(data) > 10_000  # real raster, not stub
+
+
+@pytest.mark.skipif(not node_ready, reason="node or render deps not installed")
+def test_real_carousel_render_end_to_end(temp_db, tmp_path, monkeypatch):
+    patch_settings(monkeypatch, visuals, visuals_dir=str(tmp_path), visuals_enabled=True)
+    acct = memory.upsert_account(handle="me", db_path=temp_db)
+    memory.save_brand_kit(acct, {"cta_text": "Try it", "bg_style": "gradient"},
+                          db_path=temp_db)
+    pid = memory.save_post(acct, "thread", "x",
+                           meta={"tweets": ["The hook", "point one", "point two"]},
+                           db_path=temp_db)
+    assert visuals.ensure_service() is True
+    visuals.generate_for_post(pid, db_path=temp_db)
+    meta = memory.get_post(pid, db_path=temp_db)["meta_json"]
+    assert len(meta["visual_slides"]) == 4
+    for name in meta["visual_slides"]:            # every slide a real square PNG
+        data = (tmp_path / name).read_bytes()
+        assert data.startswith(PNG_MAGIC) and len(data) > 10_000

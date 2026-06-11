@@ -201,6 +201,10 @@ class Settings:
     visuals_port: int = int(os.getenv("VISUALS_PORT", "8787"))
     visuals_dir: str = os.getenv("VISUALS_DIR", str(PROJECT_ROOT / "visuals"))
     render_dir: str = os.getenv("RENDER_DIR", str(PROJECT_ROOT / "render"))
+    # Carousel: max CONTENT slides (cover + CTA come on top); short inputs
+    # fall back to a single card rather than a thin two-slide carousel.
+    carousel_max_slides: int = int(os.getenv("CAROUSEL_MAX_SLIDES", "6"))
+    carousel_slide_chars: int = int(os.getenv("CAROUSEL_SLIDE_CHARS", "300"))
 
     # --- Content Squeezer (repurpose one input into a multi-format pack).
     # Each tuple is (format, count). Text-only formats — multi-platform APIs
