@@ -36,7 +36,9 @@ ENV DB_PATH=/data/agent.db \
     SCHEDULER_IN_APP=1 \
     PYTHONUNBUFFERED=1
 
-VOLUME ["/data"]
+# Persistence: attach a volume mounted at /data (Railway: service -> Attach
+# Volume; docker-compose maps one in compose.yml). Railway forbids the
+# Dockerfile VOLUME directive, so it is deliberately not declared here.
 EXPOSE 8080
 
 CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
