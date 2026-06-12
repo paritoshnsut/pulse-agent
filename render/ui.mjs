@@ -5,7 +5,11 @@
 import { decorLayer } from "./icons.mjs";
 
 export const SIZE = { width: 1200, height: 675 };    // 16:9 single cards
-export const SQUARE = { width: 1080, height: 1080 }; // 1:1 carousel slides
+export const SQUARE = { width: 1080, height: 1080 }; // 1:1 carousel slides + IG feed
+export const STORY = { width: 1080, height: 1920 };  // 9:16 stories/reels
+
+// canvas sizes a caller may request via data._size (server resolves)
+export const SIZES = { wide: SIZE, square: SQUARE, story: STORY };
 
 const DEFAULTS = {
   accent_color: "#4da3ff",

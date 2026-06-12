@@ -384,7 +384,7 @@ Per-account visual identity: colors, fonts, logo, tagline, tone modifiers. Used 
 | `charts.py` | Chart-spec extraction (one cached Claude call) for chart_card |
 | `blueprint.py` | Visual blueprint extraction: hook + comparison/framework/timeline/journey/process/list |
 | `narrative.py` | Narrative carousel arcs: hook → beats → payoff slides |
-| `visual_prefs.py` | Visual analytics: per-template approval stats, auto-pick bias |
+| `visual_prefs.py` | Visual Genome: per-template approval stats, preference ranking, auto-pick bias |
 | `design.py` | AI design agent |
 | `evergreen.py` | Evergreen / opinion post generator |
 
@@ -626,7 +626,7 @@ pytest -x                 # stop at first failure
 pytest tests/test_decision.py   # one module
 ```
 
-**479 tests** across 33 test files. All tests are deterministic — Claude API calls are stubbed via `conftest.StubClient`. Tests hit a real in-memory SQLite DB (via the `temp_db` fixture) for integration-level confidence.
+**488 tests** across 34 test files. All tests are deterministic — Claude API calls are stubbed via `conftest.StubClient`. Tests hit a real in-memory SQLite DB (via the `temp_db` fixture) for integration-level confidence.
 
 Key test files:
 - `test_decision.py` — scoring math, keyword pre-filter, story dedup gate

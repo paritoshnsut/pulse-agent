@@ -120,8 +120,26 @@ design (tension, emotion, narrative). "5 Founder Mistakes" informs;
 | **Narrative carousel engine** (`pipeline/narrative.py`). Carousels are now built from a story ARC — hook slide → one beat per slide (each with its own scannable headline + body) → payoff slide ("a reader who only sees slide 1 and the last slide still gets the story") — instead of paragraph splitting. One bounded Claude call, cached (`narrative` in post meta), misses cached, transient failures retried. Paragraph splitting remains the free fallback and the `NARRATIVE_CAROUSEL=false` path. `carousel_slide` template gained headline+body layout. | ✅ |
 | **Visual analytics v1** (`pipeline/visual_prefs.py`). Every render logs `visual_template` into post meta (chart/blueprint/single-card/`carousel_narrative` vs `carousel_split`). Deterministic stats join that log with approve/reject verdicts; a template with ≥6 reviews and <34% approval is SHUNNED on automatic paths (explicit requests always honored). This is the Visual-Genome seed: collect first, bias gently, compound. | ✅ |
 | Sketch/founder whiteboard mode (handwriting font + rough borders + rotations) | ⏳ — needs a handwriting family added to the merge_fonts pipeline first |
-| Visual Genome (preference profile beyond shunning: preferred density/style/hero per account) | ⏳ V2b — grows out of the analytics log once data accumulates |
 | Meme layer | 🚫 — meme formats decay fast, carry copyright risk, and one mis-calibrated meme on a political/brand account is a reputation event. Wrong risk profile, permanently. |
+
+## Phase V1.97 — choosing the right visual (SHIPPED)
+
+The insight that framed this build: with 14 templates the bottleneck moved
+from "can we render?" to "can we CHOOSE the right visual?" The winner isn't
+the system with 50 templates; it's the one that correctly decides journey-
+not-framework, narrative-carousel-not-hero, and learns that THIS account
+performs best with minimalist visuals.
+
+| Item | Status |
+|---|---|
+| **Size variants — square + story.** The render protocol accepts `data._size` (`square` 1080×1080 for IG feed, `story` 1080×1920 for reels/stories; default 16:9). Size-dependent templates (hero art, chart width, timeline rail) read the canvas dims. `generate_for_post(size=...)` renders a variant BESIDE the primary (`visual_square`/`visual_story` in meta, never replacing `visual`); API: `POST /api/drafts/{id}/visual?size=square`. Carousels stay square by definition. | ✅ |
+| **Visual A/B engine** (`generate_alternates`). Up to k alternate approaches per draft at ZERO marginal cost by construction: only cached structures (chart spec, blueprint) + free templates (procedural hero, stat/insight/quote) are candidates — no new Claude calls, ever. Ordered by the account's Visual Genome, stored in meta (`visual_alternates`), exposed at `POST /api/drafts/{id}/visual/alternates`. The human's pick via the existing swap control updates `visual_template` — which IS the preference signal, no extra plumbing. | ✅ |
+| **Visual Genome v1** (`visual_prefs.py` grown up). Beyond shunning losers: `preferred_templates()` ranks every template with ≥4 reviews by approval rate (orders A/B alternates); `better_generic_card()` upgrades the generic insight_card to a text-only template the account DEMONSTRABLY prefers (≥4 reviews, ≥60% approval, ≥15-point margin over the incumbent). Evidence-gated at every step: ordering is low-stakes (human still picks), overriding the default is gated harder. | ✅ |
+| Consulting slide layer (McKinsey-style: headline / drivers / barriers / key insight) | ⏳ — next template build, high value for founder/consultant/agency accounts |
+| Visual Review Studio (input → blueprint → template → output → approval rate, in Pulse Studio) | ⏳ — the data pipeline already exists: post meta carries blueprint, narrative, visual_template, visual_alternates |
+| Feed awareness ("what stands out among the last 20 posts this user saw") + visual trend engine | ⏸ — needs feed/competitor visual data we don't collect yet; revisit when the Instagram inspiration watcher (V2b) lands |
+| Screenshot recreation engine (fake Notion/Slack/WhatsApp/email screenshots) | 🚫 — fabricated screenshots on a political/news platform are manufactured evidence, not a growth hack. A notes-app *aesthetic* for the account's own words may come later as a style; an engine for fake screenshots, never. |
+| Visual Genome v2 (density/typography/imagery preference profile per persona) | ⏳ V2b — grows out of the analytics log + A/B picks now accumulating |
 
 ## Phase V2 — the AI-imagery design agent (V2a SHIPPED)
 

@@ -62,3 +62,46 @@ def shunned_templates(account_id: int, db_path: Optional[str] = None,
     Auto-pick avoids these; explicit requests still work."""
     return {tmpl for tmpl, s in template_stats(account_id, db_path).items()
             if s["shown"] >= min_shown and s["rate"] < max_rate}
+
+
+# ------------------------------------------------------------ Genome v1
+# Beyond shunning losers: rank winners. Evidence floors are lower here
+# because ordering alternates is low-stakes (the human still picks), while
+# overriding the default card is gated harder.
+RANK_MIN_SHOWN = 4
+PREFER_MIN_RATE = 0.6
+PREFER_MARGIN = 0.15
+
+# templates safe to substitute for the generic insight card: they need only
+# the post text, nothing structured.
+_GENERIC_SWAPS = ("hero_card", "quote_card")
+
+
+def preferred_templates(account_id: int,
+                        db_path: Optional[str] = None,
+                        min_shown: int = RANK_MIN_SHOWN) -> list:
+    """Every template with enough evidence, best approval rate first.
+    Used to ORDER alternates — never to exclude anything."""
+    stats = template_stats(account_id, db_path)
+    ranked = [(tmpl, s) for tmpl, s in stats.items() if s["shown"] >= min_shown]
+    ranked.sort(key=lambda kv: (-kv[1]["rate"], -kv[1]["shown"]))
+    return [tmpl for tmpl, _ in ranked]
+
+
+def better_generic_card(account_id: int,
+                        db_path: Optional[str] = None) -> Optional[str]:
+    """When auto-pick lands on the generic insight_card, is there a
+    text-only template this account DEMONSTRABLY prefers? Requires real
+    evidence on the challenger AND a clear margin over the incumbent."""
+    stats = template_stats(account_id, db_path)
+    base = stats.get("insight_card", {}).get("rate", 0.5) \
+        if stats.get("insight_card", {}).get("shown", 0) >= RANK_MIN_SHOWN else 0.5
+    best, best_rate = None, 0.0
+    for tmpl in _GENERIC_SWAPS:
+        s = stats.get(tmpl)
+        if not s or s["shown"] < RANK_MIN_SHOWN:
+            continue
+        if s["rate"] >= PREFER_MIN_RATE and s["rate"] >= base + PREFER_MARGIN \
+                and s["rate"] > best_rate:
+            best, best_rate = tmpl, s["rate"]
+    return best

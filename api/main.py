@@ -331,16 +331,38 @@ def brand_preview(account_id: int, body: BrandBody, user: dict = Depends(require
 
 @app.post("/api/drafts/{post_id}/visual")
 def regenerate_visual(post_id: int, template: Optional[str] = None,
+                      size: Optional[str] = None,
                       user: dict = Depends(require_auth)):
     """Re-render a draft's visual, optionally as a different template (the
-    swap control on the review card)."""
+    swap control on the review card) and/or a different canvas: size=square
+    (IG feed) or size=story (9:16 reels/stories). Size variants are saved
+    alongside the primary visual, never replacing it."""
     _own_post(post_id, user)
-    from pipeline.visuals import generate_for_post
-    path = generate_for_post(post_id, db_path=_db(), template=template)
+    from pipeline.visuals import VALID_SIZES, generate_for_post
+    if size and size not in VALID_SIZES:
+        raise HTTPException(status_code=422,
+                            detail=f"size must be one of {VALID_SIZES}")
+    path = generate_for_post(post_id, db_path=_db(), template=template,
+                             size=size)
     if not path:
         raise HTTPException(status_code=503, detail="visual generation failed")
     mount = "visuals" if Path(path).parent == Path(settings.visuals_dir) else "cards"
     return {"card_url": f"/{mount}/{Path(path).name}"}
+
+
+@app.post("/api/drafts/{post_id}/visual/alternates")
+def visual_alternates(post_id: int, k: int = 2,
+                      user: dict = Depends(require_auth)):
+    """The visual A/B control: render up to k alternate approaches (zero
+    Claude calls — cached structures + free templates only), ordered by this
+    account's Visual Genome. Picking one via the swap control records the
+    preference signal."""
+    _own_post(post_id, user)
+    from pipeline.visuals import generate_alternates
+    alts = generate_alternates(post_id, k=max(1, min(k, 4)), db_path=_db())
+    return {"alternates": [{"template": a["template"],
+                            "card_url": f"/visuals/{a['file']}"}
+                           for a in alts]}
 
 
 # --------------------------------------------------------------------------- #

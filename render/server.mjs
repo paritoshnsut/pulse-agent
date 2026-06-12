@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { TEMPLATES, TEMPLATE_SIZES, SIZE } from "./templates.mjs";
+import { SIZES } from "./ui.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.VISUALS_PORT || "8787", 10);
@@ -67,8 +68,11 @@ function customFonts(key) {
 async function renderPNG(template, data, brand) {
   const build = TEMPLATES[template];
   if (!build) throw new Error(`unknown template '${template}'`);
-  const size = TEMPLATE_SIZES[template] || SIZE;  // carousels are square
-  const svg = await satori(build(data || {}, brand || {}), {
+  // canvas: carousels are always square; otherwise the caller may request
+  // square (IG feed) or story (9:16) via data._size; default 16:9.
+  const size = TEMPLATE_SIZES[template]
+    || SIZES[(data || {})._size] || SIZE;
+  const svg = await satori(build(data || {}, brand || {}, size), {
     ...size,
     fonts: [...customFonts((brand || {}).custom_font_key), ...FONTS],
   });

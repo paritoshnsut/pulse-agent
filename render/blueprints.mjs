@@ -142,11 +142,12 @@ function railMarker(t, mood, last) {
   });
 }
 
-export function timelineCard(data, brand) {
+export function timelineCard(data, brand, dims) {
   const t = noDecor(theme(brand));
   const ms = data.milestones || [];
   const n = ms.length || 1;
-  const W = 1056;                       // content width inside frame padding
+  // content width inside the frame's 72px side padding
+  const W = ((dims && dims.width) || 1200) - 144;
   const colW = W / n;
   const dotY = 64;                      // center line of the dot row
   const cols = ms.map((m, i) => {

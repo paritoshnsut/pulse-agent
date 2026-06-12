@@ -418,13 +418,19 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
     return str(Path(settings.visuals_dir) / names[0])
 
 
+VALID_SIZES = ("square", "story")     # default (None) = 16:9 wide
+
+
 def generate_for_post(post_id: int, db_path: Optional[str] = None,
-                      renderer=None, template: Optional[str] = None) -> Optional[str]:
+                      renderer=None, template: Optional[str] = None,
+                      size: Optional[str] = None) -> Optional[str]:
     """Render the branded visual for a post; saves PNG(s) into visuals_dir and
     returns the (cover) path (None when disabled/failed — never raises).
     Multi-idea formats (thread / linkedin_post / newsletter) become square
     carousels; everything else gets a single 16:9 card. An explicit `template`
-    overrides auto-pick (the review card's swap-template control)."""
+    overrides auto-pick (the review card's swap-template control); `size`
+    ('square' for IG feed, 'story' for 9:16) re-renders the same card on a
+    different canvas."""
     if not settings.visuals_enabled:
         return None
     post = memory.get_post(post_id, db_path=db_path)
@@ -432,12 +438,15 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         return None
     account = memory.get_account(post["account_id"], db_path=db_path) or {}
     kit = memory.get_brand_kit(post["account_id"], db_path=db_path)
+    size = size if size in VALID_SIZES else None
+    suffix = f"-{size}" if size else ""
 
     r = renderer or SatoriRenderer()
 
-    if template == "hero_card":
+    if template == "hero_card" and size is None:
         # the V2 design agent (imagery underneath, Satori text on top);
-        # falls through to a flat card when no backend/refs are available
+        # falls through to a flat card when no backend/refs are available.
+        # Size variants skip the agent and use the procedural hero directly.
         from pipeline import design
         hero = design.generate_hero(post_id, db_path=db_path, renderer=r)
         if hero:
@@ -448,16 +457,21 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         """Render an extracted structure (chart/blueprint) and save it."""
         brand = brand_payload(account, kit)
         data = {**spec, "seed": post.get("id") or 0}
+        if size:
+            data["_size"] = size
         png = r.render(tmpl, data, brand)
         if png is None:
             png = PillowRenderer().render(tmpl, data, brand)
         if png is None:
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        path = _save(png, f"post{post_id}-{stamp}.png")
-        memory.update_post_meta(post_id, {"visual": path.name,
-                                          "visual_template": tmpl},
-                                db_path=db_path)
+        path = _save(png, f"post{post_id}-{stamp}{suffix}.png")
+        # size variants live beside the primary visual, never replace it
+        key = f"visual_{size}" if size else "visual"
+        meta = {key: path.name}
+        if not size:
+            meta["visual_template"] = tmpl
+        memory.update_post_meta(post_id, meta, db_path=db_path)
         logger.info("Visual for #%d: %s via %s", post_id, path.name, tmpl)
         return str(path)
 
@@ -511,12 +525,24 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         if want:
             template = None       # explicit ask, no structure: auto-pick card
 
-    if template is None and (post.get("format") or "") in CAROUSEL_FORMATS:
+    # carousels are already square; size variants apply to single cards only
+    if template is None and size is None \
+            and (post.get("format") or "") in CAROUSEL_FORMATS:
         cover = generate_carousel(post, account, kit, r, db_path=db_path)
         if cover:
             return cover  # carousel done; otherwise fall through to a card
 
     auto_template, data = choose_template(post)
+    if template is None and auto_template == "insight_card":
+        # Visual Genome: when the generic card is the pick, use the template
+        # this account demonstrably prefers instead (evidence-gated).
+        try:
+            from pipeline.visual_prefs import better_generic_card
+            preferred = better_generic_card(post["account_id"], db_path=db_path)
+        except Exception:  # noqa: BLE001
+            preferred = None
+        if preferred:
+            template = preferred
     if template and template != auto_template:
         # swapping template: rebuild the data shape the target template expects
         text = data.get("text") or " ".join(
@@ -528,8 +554,11 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         elif template == "quote_card":
             data = {"text": text}
         else:
-            data = {"title": "", "text": text}
+            data = {"title": "", "text": text,
+                    "seed": post.get("id") or 0}
     template = template or auto_template
+    if size:
+        data["_size"] = size
     brand = brand_payload(account, kit)
     png = r.render(template, data, brand)
     used = template
@@ -540,12 +569,105 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         return None
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    path = _save(png, f"post{post_id}-{stamp}.png")
-    memory.update_post_meta(post_id, {"visual": path.name,
-                                      "visual_template": template},
-                            db_path=db_path)
+    path = _save(png, f"post{post_id}-{stamp}{suffix}.png")
+    key = f"visual_{size}" if size else "visual"
+    meta_update = {key: path.name}
+    if not size:
+        meta_update["visual_template"] = template
+    memory.update_post_meta(post_id, meta_update, db_path=db_path)
     logger.info("Visual for #%d: %s via %s", post_id, path.name, used)
     return str(path)
+
+
+# --------------------------------------------------------------------------- #
+# Visual A/B: alternates (the choose-the-right-visual layer)
+# --------------------------------------------------------------------------- #
+def _alternate_candidates(post: dict) -> list:
+    """Templates this post can render WITHOUT any new Claude call: cached
+    structures (chart spec / blueprint) plus the always-free style cards.
+    The A/B engine is deliberately zero-marginal-cost."""
+    meta = post.get("meta_json") or {}
+    out = []
+    from pipeline.charts import validate_spec
+    if validate_spec(meta.get("chart")):
+        out.append("chart_card")
+    from pipeline.blueprint import TEMPLATE_FOR, validate_blueprint
+    bp = validate_blueprint(meta.get("blueprint"))
+    if bp:
+        out.append(TEMPLATE_FOR[bp["type"]])
+    out.append("hero_card")                       # procedural art: free
+    if extract_stat(post.get("content") or ""):
+        out.append("stat_highlight")
+    out += ["insight_card", "quote_card"]
+    seen, uniq = set(), []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return uniq
+
+
+def generate_alternates(post_id: int, k: int = 2,
+                        db_path: Optional[str] = None,
+                        renderer=None) -> list:
+    """Render up to k alternate visual approaches for a draft, beyond the
+    primary already on it. Returns [{"template", "file"}]; recorded in post
+    meta (visual_alternates). The human's eventual pick (via the existing
+    swap control) updates visual_template — which is exactly the preference
+    signal the Visual Genome learns from. Zero Claude calls by construction."""
+    if not settings.visuals_enabled:
+        return []
+    post = memory.get_post(post_id, db_path=db_path)
+    if not post:
+        return []
+    account = memory.get_account(post["account_id"], db_path=db_path) or {}
+    kit = memory.get_brand_kit(post["account_id"], db_path=db_path)
+    meta = post.get("meta_json") or {}
+    primary = meta.get("visual_template")
+
+    candidates = [t for t in _alternate_candidates(post) if t != primary]
+    # genome ordering: the account's proven winners come first
+    try:
+        from pipeline.visual_prefs import preferred_templates
+        ranking = preferred_templates(post["account_id"], db_path=db_path)
+        order = {t: i for i, t in enumerate(ranking)}
+        candidates.sort(key=lambda t: order.get(t, len(order)))
+    except Exception:  # noqa: BLE001
+        pass
+
+    r = renderer or SatoriRenderer()
+    brand = brand_payload(account, kit)
+    text = _strip_hashtags((meta.get("tweets") or [post["content"]])[0])
+    seed = post.get("id") or 0
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    from pipeline.blueprint import TEMPLATE_FOR, validate_blueprint
+    from pipeline.charts import validate_spec
+    out = []
+    for tmpl in candidates[: max(0, k)]:
+        if tmpl == "chart_card":
+            data = {**validate_spec(meta.get("chart")), "seed": seed}
+        elif tmpl in TEMPLATE_FOR.values():
+            data = {**validate_blueprint(meta.get("blueprint")), "seed": seed}
+        elif tmpl == "stat_highlight":
+            stat = extract_stat(text) or ""
+            data = {"stat": stat, "seed": seed,
+                    "context": text.replace(stat, "").strip(" .—–:,-") or text}
+        else:                                     # hero / insight / quote
+            data = {"text": text, "title": "", "seed": seed,
+                    "icon": pick_icon(post)}
+        png = r.render(tmpl, data, brand)
+        if png is None:
+            continue                              # alternates never hard-fail
+        name = _save(png, f"post{post_id}-{stamp}-alt-{tmpl}.png").name
+        out.append({"template": tmpl, "file": name})
+
+    if out:
+        memory.update_post_meta(post_id, {"visual_alternates": out},
+                                db_path=db_path)
+        logger.info("Alternates for #%d: %s", post_id,
+                    [a["template"] for a in out])
+    return out
 
 
 if __name__ == "__main__":

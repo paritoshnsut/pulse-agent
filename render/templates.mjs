@@ -80,9 +80,11 @@ export function insightCard(data, brand) {
 // Real data visualization: headline + a bar/line chart drawn from the spec
 // Python extracted (and cached on the post). The chart IS the message; the
 // decor layer stays off so nothing competes with the data.
-export function chartCard(data, brand) {
+export function chartCard(data, brand, dims = SIZE) {
   const t = theme(brand);
   const title = data.title || data.text || "";
+  const chartW = dims.width - 144;            // frame padding is 72 each side
+  const chartH = Math.min(Math.round(dims.height * 0.49), 560);
   return frame({ ...t, decor_style: "none" }, [
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
@@ -93,7 +95,7 @@ export function chartCard(data, brand) {
       }, title),
       chartNode({ kind: data.kind || "bar", labels: data.labels || [],
                   values: data.values || [], unit: data.unit || "" },
-                t, { width: 1056, height: 330 }),
+                t, { width: chartW, height: chartH }),
       data.source ? el("div", {
         fontSize: 20, color: t.muted, marginTop: 14, display: "flex",
       }, `Source: ${data.source}`) : el("div", { display: "flex" }),
@@ -109,20 +111,20 @@ export function chartCard(data, brand) {
 // without trusting an image model to spell. Text sits on a darkening scrim,
 // so the foreground is always light regardless of the kit's bg_style.
 // No image -> seeded procedural art (art.mjs), never a flat gradient.
-export function heroCard(data, brand) {
+export function heroCard(data, brand, dims = SIZE) {
   const t = theme(brand);
   const text = data.text || "";
   const img = data.image || null;  // {src: dataURL, width, height} or null
   const layers = [];
   if (img) {
     layers.push({ type: "img", props: {
-      src: img.src, width: SIZE.width, height: SIZE.height,
+      src: img.src, width: dims.width, height: dims.height,
       style: { position: "absolute", top: 0, left: 0,
-               width: SIZE.width, height: SIZE.height, objectFit: "cover" },
+               width: dims.width, height: dims.height, objectFit: "cover" },
     } });
   } else {
     layers.push(...artLayers(data.seed || 0, t.accent, t.secondary,
-                             SIZE.width, SIZE.height));
+                             dims.width, dims.height));
   }
   // photos need a strong scrim for text contrast; procedural art is already
   // dark, so a soft one keeps the composition from flattening to black.
