@@ -38,7 +38,8 @@ logger = logging.getLogger("blueprint")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
 # template name <-> blueprint type
-BLUEPRINT_TYPES = ("comparison", "framework", "timeline", "process", "list")
+BLUEPRINT_TYPES = ("comparison", "framework", "timeline", "process", "list",
+                   "journey")
 TEMPLATE_FOR = {t: f"{t}_card" for t in BLUEPRINT_TYPES}
 TYPE_FOR = {v: k for k, v in TEMPLATE_FOR.items()}
 
@@ -48,23 +49,38 @@ Pick the single best fit, or null if none genuinely fits:
 - comparison: two things contrasted (X vs Y, before/after, old way/new way)
 - framework: 3-5 named pillars/components of one idea
 - timeline: 3-6 dated milestones (years, months, quarters)
+- journey: a NARRATIVE sequence with emotional beats — wins, failures, a
+  turning point ("18 months building, then finally talked to users")
 - process: 3-5 sequential steps (do A, then B, then C)
 - list: 3-6 parallel tips/mistakes/reasons/rules
 
-Return JSON for the chosen type:
+ALSO extract the HOOK: the single most scroll-stopping line in the content —
+the most surprising number, most contrarian claim, or most emotional
+statement, written as a punch (max 60 chars). People decide in one second;
+the hook is what they decide on. If nothing genuinely stops the scroll,
+use empty string — never manufacture drama.
 
-comparison: {{"type":"comparison","title":"...","left_title":"...","right_title":"...",
-  "left_points":["2-4 short points"],"right_points":["same count as left"]}}
-framework:  {{"type":"framework","title":"...","items":[{{"label":"...","desc":"one line"}}]}}
-timeline:   {{"type":"timeline","title":"...","milestones":[{{"period":"2024","text":"..."}}]}}
-process:    {{"type":"process","title":"...","steps":[{{"label":"...","desc":"one line or empty"}}]}}
-list:       {{"type":"list","title":"...","items":["3-6 short items"]}}
+Return JSON for the chosen type (every type also carries "hook"):
+
+comparison: {{"type":"comparison","hook":"...","title":"...","left_title":"...",
+  "right_title":"...","left_points":["2-4 short points"],
+  "right_points":["same count as left"]}}
+framework:  {{"type":"framework","hook":"...","title":"...",
+  "items":[{{"label":"...","desc":"one line"}}]}}
+timeline:   {{"type":"timeline","hook":"...","title":"...",
+  "milestones":[{{"period":"2024","text":"..."}}]}}
+journey:    {{"type":"journey","hook":"...","title":"...",
+  "milestones":[{{"period":"Month 1","text":"...","mood":"fail|win|turn|neutral"}}]}}
+process:    {{"type":"process","hook":"...","title":"...",
+  "steps":[{{"label":"...","desc":"one line or empty"}}]}}
+list:       {{"type":"list","hook":"...","title":"...","items":["3-6 short items"]}}
 
 If nothing fits, return exactly: null
 
-Rules: every label, point and date must come from the content — extract,
-never invent. Titles max 70 chars; points/labels max 60 chars; desc max 80.
-Prefer null over forcing a weak structure. Return ONLY the JSON or null.
+Rules: every label, point, date and the hook must come from the content —
+extract, never invent. Titles max 70 chars; points/labels max 60 chars;
+desc max 80. Prefer null over forcing a weak structure.
+Return ONLY the JSON or null.
 
 {want}POST:
 {post}
@@ -84,13 +100,14 @@ def validate_blueprint(bp: Any) -> Optional[dict]:
         return None
     t = bp.get("type")
     title = _clamp(bp.get("title"), 80)
+    hook = _clamp(bp.get("hook"), 64)
 
     if t == "comparison":
         left = [_clamp(p, 64) for p in (bp.get("left_points") or []) if _clamp(p, 64)]
         right = [_clamp(p, 64) for p in (bp.get("right_points") or []) if _clamp(p, 64)]
         if not (2 <= len(left) <= 4 and 2 <= len(right) <= 4):
             return None
-        return {"type": t, "title": title,
+        return {"type": t, "title": title, "hook": hook,
                 "left_title": _clamp(bp.get("left_title"), 28) or "Before",
                 "right_title": _clamp(bp.get("right_title"), 28) or "After",
                 "left_points": left, "right_points": right}
@@ -102,16 +119,21 @@ def validate_blueprint(bp: Any) -> Optional[dict]:
                  and _clamp(i.get("label"), 40)]
         if not (3 <= len(items) <= 5):
             return None
-        return {"type": t, "title": title, "items": items}
+        return {"type": t, "title": title, "hook": hook, "items": items}
 
-    if t == "timeline":
+    if t in ("timeline", "journey"):
         ms = [{"period": _clamp(m.get("period"), 12),
-               "text": _clamp(m.get("text"), 70)}
+               "text": _clamp(m.get("text"), 70),
+               "mood": (m.get("mood") if m.get("mood") in
+                        ("win", "fail", "turn") else "neutral")}
               for m in (bp.get("milestones") or []) if isinstance(m, dict)
               and _clamp(m.get("period"), 12)]
         if not (3 <= len(ms) <= 6):
             return None
-        return {"type": t, "title": title, "milestones": ms}
+        # a journey without a single emotional beat is just a timeline
+        if t == "journey" and all(m["mood"] == "neutral" for m in ms):
+            t = "timeline"
+        return {"type": t, "title": title, "hook": hook, "milestones": ms}
 
     if t == "process":
         steps = [{"label": _clamp(s.get("label"), 36),
@@ -120,13 +142,13 @@ def validate_blueprint(bp: Any) -> Optional[dict]:
                  and _clamp(s.get("label"), 36)]
         if not (3 <= len(steps) <= 5):
             return None
-        return {"type": t, "title": title, "steps": steps}
+        return {"type": t, "title": title, "hook": hook, "steps": steps}
 
     if t == "list":
         items = [_clamp(i, 80) for i in (bp.get("items") or []) if _clamp(i, 80)]
         if not (3 <= len(items) <= 6):
             return None
-        return {"type": t, "title": title, "items": items}
+        return {"type": t, "title": title, "hook": hook, "items": items}
 
     return None
 

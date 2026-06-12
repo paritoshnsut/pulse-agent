@@ -106,6 +106,23 @@ chart_card: one bounded call, "extract never invent", cached on the post
 | Square (1080×1080) variants of the blueprint cards for IG feed | ⏳ |
 | 9:16 story/reel template | ⏳ |
 
+## Phase V1.95 — attention design (SHIPPED)
+
+The honest critique that drove this: the system was optimized for
+*information* design (useful, clear) when virality runs on *attention*
+design (tension, emotion, narrative). "5 Founder Mistakes" informs;
+"I wasted 2 years because of this" stops the scroll. Same content.
+
+| Item | Status |
+|---|---|
+| **Hook hierarchy.** The blueprint extractor now also pulls the HOOK — the single most surprising/contrarian/emotional line (≤60 chars, "never manufacture drama": empty when nothing genuinely stops the scroll). Templates render the hook as the dominant headline with the descriptive title demoted to a small uppercase overline. No hook → title leads, exactly as before. | ✅ |
+| **journey_card** — the narrative timeline. Milestones carry a MOOD (`win`/`fail`/`turn`/`neutral`): red ✕ circles for the failure beats, green ✓ for the win, filled accent dot at the turning point ("Month 1 build → Month 12 still building ✕ → Month 18 talked to users → Today PMF ✓"). A journey with zero emotional beats auto-downgrades to plain timeline — emotion is extracted, never decorated on. | ✅ |
+| **Narrative carousel engine** (`pipeline/narrative.py`). Carousels are now built from a story ARC — hook slide → one beat per slide (each with its own scannable headline + body) → payoff slide ("a reader who only sees slide 1 and the last slide still gets the story") — instead of paragraph splitting. One bounded Claude call, cached (`narrative` in post meta), misses cached, transient failures retried. Paragraph splitting remains the free fallback and the `NARRATIVE_CAROUSEL=false` path. `carousel_slide` template gained headline+body layout. | ✅ |
+| **Visual analytics v1** (`pipeline/visual_prefs.py`). Every render logs `visual_template` into post meta (chart/blueprint/single-card/`carousel_narrative` vs `carousel_split`). Deterministic stats join that log with approve/reject verdicts; a template with ≥6 reviews and <34% approval is SHUNNED on automatic paths (explicit requests always honored). This is the Visual-Genome seed: collect first, bias gently, compound. | ✅ |
+| Sketch/founder whiteboard mode (handwriting font + rough borders + rotations) | ⏳ — needs a handwriting family added to the merge_fonts pipeline first |
+| Visual Genome (preference profile beyond shunning: preferred density/style/hero per account) | ⏳ V2b — grows out of the analytics log once data accumulates |
+| Meme layer | 🚫 — meme formats decay fast, carry copyright risk, and one mis-calibrated meme on a political/brand account is a reputation event. Wrong risk profile, permanently. |
+
 ## Phase V2 — the AI-imagery design agent (V2a SHIPPED)
 
 The user-insight this encodes: human designers already work as

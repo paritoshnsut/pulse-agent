@@ -356,20 +356,48 @@ def _save(png: bytes, name: str) -> Path:
     return path
 
 
+def _narrative_pack(post: dict, kit: Optional[dict],
+                    db_path: Optional[str] = None) -> Optional[dict]:
+    """A carousel pack built from the post's narrative ARC (hook → beats →
+    payoff) instead of paragraph splitting. None -> caller falls back."""
+    if not settings.narrative_carousel:
+        return None
+    try:
+        from pipeline.narrative import NarrativeArcExtractor
+        arc = NarrativeArcExtractor().arc_for(post, db_path=db_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Narrative arc failed for #%s: %s", post.get("id"), exc)
+        return None
+    if not arc:
+        return None
+    return {
+        "cover": arc[0]["headline"],
+        "slides": [{"headline": s["headline"], "text": s.get("body") or ""}
+                   for s in arc[1:]],
+        "cta": {"cta_text": (kit or {}).get("cta_text"),
+                "cta_url": (kit or {}).get("cta_url")},
+    }
+
+
 def generate_carousel(post: dict, account: dict, kit: Optional[dict],
                       renderer, db_path: Optional[str] = None) -> Optional[str]:
     """Render cover + content slides + CTA as separate square PNGs. Records
     every slide in post meta (visual_slides) and returns the cover's path.
-    Any slide failing -> the whole carousel is abandoned (caller falls back
-    to a single card) — a half-carousel is worse than none."""
-    pack = split_into_slides(post, kit)
+    Narrative arc first (a STORY with a hook and a payoff), paragraph
+    splitting as the always-works fallback. Any slide failing -> the whole
+    carousel is abandoned (caller falls back to a single card) — a
+    half-carousel is worse than none."""
+    pack, mode = _narrative_pack(post, kit, db_path), "carousel_narrative"
+    if not pack:
+        pack, mode = split_into_slides(post, kit), "carousel_split"
     if not pack:
         return None
     brand = brand_payload(account, kit)
     total = len(pack["slides"]) + 2  # cover + content + cta
     jobs = [("carousel_cover", {"text": pack["cover"], "total": total})]
-    jobs += [("carousel_slide", {"text": s, "index": i + 2, "total": total})
-             for i, s in enumerate(pack["slides"])]
+    for i, s in enumerate(pack["slides"]):
+        data = dict(s) if isinstance(s, dict) else {"text": s}
+        jobs.append(("carousel_slide", {**data, "index": i + 2, "total": total}))
     jobs.append(("carousel_cta", {**pack["cta"], "index": total, "total": total}))
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -383,9 +411,10 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
         names.append(_save(png, f"post{post['id']}-{stamp}-slide{n}.png").name)
 
     memory.update_post_meta(post["id"], {"visual": names[0],
-                                         "visual_slides": names},
+                                         "visual_slides": names,
+                                         "visual_template": mode},
                             db_path=db_path)
-    logger.info("Carousel for #%d: %d slides.", post["id"], total)
+    logger.info("Carousel for #%d: %d slides via %s.", post["id"], total, mode)
     return str(Path(settings.visuals_dir) / names[0])
 
 
@@ -426,15 +455,27 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         path = _save(png, f"post{post_id}-{stamp}.png")
-        memory.update_post_meta(post_id, {"visual": path.name}, db_path=db_path)
+        memory.update_post_meta(post_id, {"visual": path.name,
+                                          "visual_template": tmpl},
+                                db_path=db_path)
         logger.info("Visual for #%d: %s via %s", post_id, path.name, tmpl)
         return str(path)
+
+    # visual analytics bias: templates this account keeps rejecting are
+    # avoided on the AUTOMATIC paths only — an explicit ask always wins.
+    try:
+        from pipeline.visual_prefs import shunned_templates
+        shunned = shunned_templates(post["account_id"], db_path=db_path) \
+            if template is None else set()
+    except Exception:  # noqa: BLE001
+        shunned = set()
 
     # data visualization: an explicit chart_card request, or a data_story on
     # auto-pick, tries the chart spec (cached on the post; one Claude call
     # max, behind the free numeric gate). No series -> normal card path.
     if template == "chart_card" or (template is None
-                                    and post.get("format") == "data_story"):
+                                    and post.get("format") == "data_story"
+                                    and "chart_card" not in shunned):
         try:
             from pipeline.charts import ChartExtractor
             spec = ChartExtractor().spec_for(post, db_path=db_path)
@@ -463,7 +504,7 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         except Exception as exc:  # noqa: BLE001
             logger.warning("Blueprint path failed for #%d: %s", post_id, exc)
             bp = None
-        if bp:
+        if bp and (want or TEMPLATE_FOR[bp["type"]] not in shunned):
             out = _render_structured(TEMPLATE_FOR[bp["type"]], bp)
             if out:
                 return out
@@ -500,7 +541,9 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     path = _save(png, f"post{post_id}-{stamp}.png")
-    memory.update_post_meta(post_id, {"visual": path.name}, db_path=db_path)
+    memory.update_post_meta(post_id, {"visual": path.name,
+                                      "visual_template": template},
+                            db_path=db_path)
     logger.info("Visual for #%d: %s via %s", post_id, path.name, used)
     return str(path)
 

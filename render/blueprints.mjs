@@ -12,11 +12,25 @@ import { iconNode } from "./icons.mjs";
 
 const noDecor = (t) => ({ ...t, decor_style: "none" });
 
-function title(t, text, marginBottom = 36) {
-  return el("div", {
-    fontSize: fitFontSize(text, 42, 30), fontWeight: 700, lineHeight: 1.15,
-    marginBottom, display: "flex",
-  }, text);
+// Attention design, not just information design: when the extractor found a
+// HOOK (the scroll-stopping line), it becomes the dominant headline and the
+// descriptive title demotes to a small overline. No hook -> title leads.
+function headline(t, data, marginBottom = 36) {
+  const hook = (data.hook || "").trim();
+  const main = hook || data.title || "";
+  const rows = [];
+  if (hook && data.title) {
+    rows.push(el("div", {
+      fontSize: 21, fontWeight: 700, color: t.muted, marginBottom: 14,
+      textTransform: "uppercase", letterSpacing: 2, display: "flex",
+    }, data.title));
+  }
+  rows.push(el("div", {
+    fontSize: fitFontSize(main, hook ? 50 : 42, 30), fontWeight: 700,
+    lineHeight: 1.12, display: "flex",
+  }, main));
+  return el("div", { display: "flex", flexDirection: "column", marginBottom },
+            rows);
 }
 
 // ------------------------------------------------------------- comparison
@@ -51,7 +65,7 @@ export function comparisonCard(data, brand) {
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
                 justifyContent: "center" }, [
-      title(t, data.title),
+      headline(t, data),
       el("div", { display: "flex", alignItems: "stretch" }, [
         panel(data.left_title, data.left_points || [], false),
         el("div", { width: 76, display: "flex", alignItems: "center",
@@ -95,7 +109,7 @@ export function frameworkCard(data, brand) {
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
                 justifyContent: "center" }, [
-      title(t, data.title),
+      headline(t, data),
       el("div", { display: "flex", alignItems: "stretch" }, cards),
     ]),
     footer(t),
@@ -104,7 +118,30 @@ export function frameworkCard(data, brand) {
 
 // --------------------------------------------------------------- timeline
 // 3-6 dated milestones on a horizontal rail; the latest one is "now" and
-// gets the filled accent dot.
+// gets the filled accent dot. Milestones may carry a MOOD (win/fail/turn —
+// the journey variant): the marker turns into a green check / red cross /
+// filled accent dot, because narrative beats are what humans actually read.
+const MOOD = { win: "#22c55e", fail: "#ef4444" };
+
+function railMarker(t, mood, last) {
+  if (mood === "win" || mood === "fail") {
+    const c = MOOD[mood];
+    return el("div", {
+      width: 34, height: 34, borderRadius: 34, display: "flex",
+      alignItems: "center", justifyContent: "center",
+      background: "#101319", border: `3px solid ${c}`,
+    }, [iconNode(mood === "win" ? "check" : "x", 18, c, 1, 3)]);
+  }
+  const turn = mood === "turn";
+  const pop = turn || last;
+  return el("div", {
+    width: pop ? 22 : 18, height: pop ? 22 : 18,
+    borderRadius: 22, display: "flex",
+    background: pop ? t.accent : "#101319",
+    border: `3px solid ${t.accent}`,
+  });
+}
+
 export function timelineCard(data, brand) {
   const t = noDecor(theme(brand));
   const ms = data.milestones || [];
@@ -114,22 +151,18 @@ export function timelineCard(data, brand) {
   const dotY = 64;                      // center line of the dot row
   const cols = ms.map((m, i) => {
     const last = i === n - 1;
+    const mood = m.mood || "neutral";
+    const periodColor = MOOD[mood]
+      || (mood === "turn" || last ? t.accent : t.fg);
     return el("div", {
       display: "flex", flexDirection: "column", alignItems: "center",
       width: colW, textAlign: "center",
     }, [
       el("div", { fontSize: n >= 5 ? 24 : 27, fontWeight: 700,
-                  color: last ? t.accent : t.fg, height: 44,
+                  color: periodColor, height: 44,
                   display: "flex" }, m.period),
       el("div", { height: 40, display: "flex", alignItems: "center",
-                  justifyContent: "center" }, [
-        el("div", {
-          width: last ? 22 : 18, height: last ? 22 : 18,
-          borderRadius: 22, display: "flex",
-          background: last ? t.accent : "#101319",
-          border: `3px solid ${t.accent}`,
-        }),
-      ]),
+                  justifyContent: "center" }, [railMarker(t, mood, last)]),
       el("div", { fontSize: n >= 5 ? 18 : 20, color: t.muted, marginTop: 14,
                   lineHeight: 1.35, display: "flex",
                   padding: "0 10px", justifyContent: "center" }, m.text),
@@ -139,7 +172,7 @@ export function timelineCard(data, brand) {
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
                 justifyContent: "center" }, [
-      title(t, data.title, 44),
+      headline(t, data, 44),
       el("div", { position: "relative", display: "flex", width: W }, [
         // the rail: from the first dot's center to the last dot's center
         el("div", {
@@ -191,7 +224,7 @@ export function processCard(data, brand) {
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
                 justifyContent: "center" }, [
-      title(t, data.title),
+      headline(t, data),
       el("div", { display: "flex", alignItems: "stretch" }, row),
     ]),
     footer(t),
@@ -219,7 +252,7 @@ export function listCard(data, brand) {
     accentBar(t),
     el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
                 justifyContent: "center" }, [
-      title(t, data.title, 28),
+      headline(t, data, 28),
       el("div", { display: "flex", flexDirection: "column" }, rows),
     ]),
     footer(t),
@@ -230,6 +263,7 @@ export const BLUEPRINT_TEMPLATES = {
   comparison_card: comparisonCard,
   framework_card: frameworkCard,
   timeline_card: timelineCard,
+  journey_card: timelineCard,   // same rail; the moods carry the story
   process_card: processCard,
   list_card: listCard,
 };

@@ -257,6 +257,10 @@ class Settings:
     # fall back to a single card rather than a thin two-slide carousel.
     carousel_max_slides: int = int(os.getenv("CAROUSEL_MAX_SLIDES", "6"))
     carousel_slide_chars: int = int(os.getenv("CAROUSEL_SLIDE_CHARS", "300"))
+    # Narrative carousel: one bounded Claude call turns the post into a slide
+    # ARC (hook → beats → payoff) instead of paragraph splitting. Cached on
+    # the post. Off -> the free splitter (which also remains the fallback).
+    narrative_carousel: bool = os.getenv("NARRATIVE_CAROUSEL", "true").lower() == "true"
     # --- Visuals V2: the AI-imagery design agent (VISUALS.md Phase V2).
     # Default backend "library" is keyless: it picks from the account's
     # uploaded approved backgrounds (visual_refs). "openai" enables paid

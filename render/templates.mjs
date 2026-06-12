@@ -213,12 +213,25 @@ export function carouselCover(data, brand) {
 export function carouselSlide(data, brand) {
   const t = theme(brand);
   const text = data.text || "";
+  const head = (data.headline || "").trim();
+  // narrative slides lead with their own scannable headline; plain split
+  // slides keep the single text block.
+  const body = head
+    ? el("div", { display: "flex", flexDirection: "column", flexGrow: 1,
+                  justifyContent: "center" }, [
+        el("div", { fontSize: fitFontSize(head, 58, 38), fontWeight: 700,
+                    lineHeight: 1.15, display: "flex" }, head),
+        text ? el("div", { fontSize: 32, lineHeight: 1.4, color: t.muted,
+                           marginTop: 30, display: "flex" }, text)
+             : el("div", { display: "flex" }),
+      ])
+    : el("div", {
+        fontSize: fitFontSize(text, 52, 32), fontWeight: 600, lineHeight: 1.32,
+        display: "flex", flexGrow: 1, alignItems: "center",
+      }, text);
   return squareFrame(t, [
     slideCounter(t, data.index, data.total),
-    el("div", {
-      fontSize: fitFontSize(text, 52, 32), fontWeight: 600, lineHeight: 1.32,
-      display: "flex", flexGrow: 1, alignItems: "center",
-    }, text),
+    body,
     footer(t),
   ], data);
 }
