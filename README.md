@@ -1,459 +1,639 @@
-# Pulse — autonomous content copilot for any brand, creator, or commentator
+# Pulse Agent — Engineering Guide
 
-> Started as a political/news commentator agent; now a domain-agnostic content
-> engine. The wedge is the same for everyone: an autonomous agent that watches
-> your world, learns your voice + brand, and never lets you face a blank page.
-> **Marketing-ready v1** adds: vertical presets (SaaS/D2C/creator/finance/…),
-> the **Content Squeezer** (one blog/podcast → a pack of platform-shaped
-> drafts), and a **Brand Kit** (banned words, swaps, CTAs, disclaimers — obeyed
-> on every draft). See [CLAUDE.md](CLAUDE.md) for full status + roadmap.
+The autonomous AI content agent for political and news accounts. It watches the internet 24/7, scores what matters, drafts posts in your voice, and sends them to your phone for one-tap approval. It never posts to X automatically — you own the publish step.
 
 ---
 
+## Table of Contents
 
+1. [What this system does](#what-this-system-does)
+2. [Data flow end-to-end](#data-flow-end-to-end)
+3. [Input sources](#input-sources)
+4. [The cost filter (3 layers)](#the-cost-filter-3-layers)
+5. [Scoring (decision agent)](#scoring-decision-agent)
+6. [Drafting pipeline](#drafting-pipeline)
+7. [Safety gates](#safety-gates)
+8. [Review and posting](#review-and-posting)
+9. [Style DNA system](#style-dna-system)
+10. [Scheduled jobs](#scheduled-jobs)
+11. [Database schema](#database-schema)
+12. [Source file index](#source-file-index)
+13. [API and Pulse Studio](#api-and-pulse-studio)
+14. [Setup](#setup)
+15. [Running locally](#running-locally)
+16. [Deploying to Railway](#deploying-to-railway)
+17. [Environment variables](#environment-variables)
+18. [Test suite](#test-suite)
+19. [What's not built yet](#whats-not-built-yet)
 
-Watches the news + social signals on a schedule, decides what's worth reacting
-to, drafts posts in *your* voice, and gates them for quality — on its own, every
-few minutes. Built for one person (you), multiple personas.
+---
 
-## The loop (what runs on its own)
+## What this system does
+
+**One persona loop (the typical case):** The agent ingests ~8,000+ articles/day from 117+ RSS feeds, YouTube channels, Reddit, Google Trends, Wikipedia, and Google News. It filters this down to ~200 articles that are both relevant to your niche and genuinely new stories. It scores each one via Claude, identifies the top FIRE/WARM signals, and drafts platform-native posts in your voice. The drafts arrive on your Telegram within minutes of the event. You tap `/approve` — the post is formatted and you copy it to X.
+
+**Multi-persona:** Every account has its own verticals, topics, and style DNA. The scoring and drafting loop runs independently per persona. Ingestion is shared (one RSS fetch feeds all accounts).
+
+---
+
+## Data flow end-to-end
 
 ```
-  scheduler.py  ── polls every N min ──┐
-                                       ▼
-   news 15m · youtube 15m · reddit 20m · trends 30m · wikipedia 60m
-        │   each watcher → normalized article (tagged vertical/region,
-        │                  + REAL velocity for reddit/trends/wiki)
-        ▼
-   articles ──(process cycle, 10m)──► per persona, its lanes only:
-        │                              decision.py  score → FIRE/WARM/COOL/SKIP
-        │                              generator.py draft in that persona's voice
-        │                              scorer.py    persona gate (>70), regen if low
-        ▼
-   posts (draft) ──► pushed to your Telegram the moment they exist
-        │
-        ▼
-   YOU approve (/approve on phone, or review.py) ──► final labeled text
-        │                                            + tap-to-compose X link
-        ▼                                            (X opens pre-filled,
-   YOU press Post on X ──► /posted ──► /perf 12 ...   YOU press Post)
-        │
-        ▼
-   learning loop (6h) ── approve/reject + engagement → voice + historical_perf
-   crowd loop (weekly) ── niche's top posts → Genome B (structure, not voice)
+INGEST                         FILTER                         SCORE & DRAFT
+──────                         ──────                         ─────────────
+
+RSS (117 feeds)  ──┐           Layer 1: Stale skip            DecisionAgent.run()
+YouTube (keyless)  │           (>3h old → skip free)          ├─ keyword pre-filter
+Reddit (OAuth)     ├──► DB ──► Layer 2: Keyword pre-filter    ├─ story dedup gate
+Google Trends      │    articles  (zero topic overlap → skip) └─ Claude score (7 dims)
+Wikipedia          │
+Google News (RSS) ─┘           Layer 3: Story dedup               │
+Moments calendar               (already scored this story         ▼
+Autonomous discovery           for this account → skip)       signals table
+
+                                          ├─ FIRE / WARM → draft
+                                          └─ COOL / SKIP → ideas bank
+
+DRAFT PIPELINE                 SAFETY GATES               REVIEW
+──────────────                 ────────────               ──────
+ContextRetriever               Grounding check            Telegram bot (/approve)
+  6-layer memory package       Stance arc guard           review.py CLI
+ContentGenerator               Backlash simulator         Pulse Studio (web UI)
+  12 content formats           Persona consistency ≥ 70       │
+PersonaConsistencyScorer                                       ▼
+  vocab/rhythm/tone/stance/    ─────────────────────►  POST
+  emotion axes (0-100)         User copies to X / posts
+                               Telegram auto-publish OK
+                               Image card attached (Pillow)
+                               "AI-assisted" label appended
+
+POST-PUBLISH LOOP
+─────────────────
+Style learning (approve/reject signal)
+Engagement feedback (historical_perf weight)
+Prediction callbacks (I called this / I got this wrong)
+Daily briefing digest (COOL ideas, outbox nag, timing advice)
 ```
 
-**Why no auto-posting to X:** automated posting from a personal account is the
-fastest way to get flagged as a bot (and the official write API is paid). The
-copilot flow keeps a human pressing Post — as far as X can tell, you typed it —
-while the agent does everything up to that tap. Telegram channel publishing IS
-automated (optional), because Telegram supports bot posting natively.
+---
 
-## What's built
+## Input sources
 
-| Layer | File | Status |
+### RSS / NewsAPI (117 feeds, 15 min interval)
+Organized into verticals: `politics`, `finance`, `sports`, `entertainment`, `technology`, `marketing`. Each vertical has India + US feeds plus global outlets. The full catalog is in `sources.py`. Active accounts' verticals determine which verticals are actually fetched — a politics-only setup never pulls marketing feeds.
+
+Custom per-account feeds are set via `watch_list` rows with `kind=rss_feed` or `kind=news_query` (NewsAPI keyword queries). These ride along with the global feed pull.
+
+### YouTube (15 min interval)
+Polls tracked channel IDs via the keyless YouTube RSS feed (`https://www.youtube.com/feeds/videos.xml?channel_id=...`). No API key required. New videos are ingested; transcripts are fetched via the unified transcription layer.
+
+**Transcription layer** (`watch/transcribe.py`) — 4 backends in priority order:
+| Backend | Cost | Notes |
 |---|---|---|
-| **Polling loop / scheduler** | `scheduler.py` | ✅ **new** — APScheduler, per-source intervals |
-| **YouTube watch** (keyless upload RSS) | `watch/youtube.py` | ✅ **new** |
-| **Reddit watch** (keyless JSON, real velocity) | `watch/reddit.py` | ✅ **new** |
-| **Google Trends watch** (keyless RSS) | `watch/trends.py` | ✅ **new** |
-| **Wikipedia edit-storm watch** | `watch/trends.py` | ✅ **new** |
-| **Twitter watch** (pluggable stub) | `watch/twitter.py` | ✅ **new** — disabled; see below |
-| **Multi-account / per-vertical personas** | schema + memory + decision | ✅ **new** |
-| News monitor (RSS + NewsAPI) | `pipeline/monitor.py` | ✅ |
-| Source catalog (65 feeds) | `sources.py` | ✅ |
-| Decision / importance scorer | `pipeline/decision.py` | ✅ (now uses real velocity when present) |
-| Style DNA / Genome A | `style/dna.py` | ✅ |
-| Content generator | `pipeline/generator.py` | ✅ |
-| Persona consistency scorer | `style/scorer.py` | ✅ |
-| Review CLI + manual posting flow | `review.py` | ✅ — approve → compose link → --posted → --perf |
-| Genome B / crowd wisdom | `style/crowd.py` | ✅ — needs `TWITTER_API_IO_KEY`; no-ops without |
-| Approve/reject learning loop | `style/learning.py` | ✅ — updates Genome A + fills `historical_perf` |
-| Copilot dispatch (X intent links, AI label, Telegram push) | `pipeline/poster.py` | ✅ |
-| Telegram phone commands (/approve /posted /perf …) | `pipeline/telegram_bot.py` | ✅ |
-| Engagement feedback (manual /perf → historical_perf) | `style/learning.py` + `engagement` table | ✅ |
-| 6-layer context retriever (the memory moat, read side) | `pipeline/context.py` | ✅ — pure SQLite, zero Claude cost |
-| Memory updater (stances, timeline, predictions on /posted) | `pipeline/updater.py` | ✅ — 1 Claude call per posted item |
-| Callback generator ("I called this" when predictions resolve) | `pipeline/callbacks.py` | ✅ — hourly, free on quiet cycles |
-| **All 12 formats** + per-signal format choice | `pipeline/generator.py` + `decision.py` | ✅ |
-| **Video reaction** (keyless YouTube transcripts, no Whisper) | `watch/youtube.py` + `video_reaction` format | ✅ **new** |
-| **Evergreen** (/evergreen — opinion posts from stance memory) | `pipeline/evergreen.py` | ✅ **new** — on demand, never scheduled |
-| Image cards (branded PNG with every approval package) | `image/cards.py` | ✅ — Pillow, deterministic |
-| **Audience fatigue detector** (Nth take on a topic isn't drafted) | `pipeline/fatigue.py` | ✅ **new** — pure SQL |
-| **Timing engine** (best-window advice from your /perf data) | `pipeline/timing.py` | ✅ **new** — honest defaults until learned |
-| **Morning briefing** (ideas bank, outbox, predictions, stats) | `pipeline/briefing.py` | ✅ **new** — daily, zero Claude cost |
-| **Counter-narrative detector** (the angle nobody is taking) | `pipeline/counter.py` | ✅ **new** — FIRE + heavy coverage only |
-| **Emotion calibration** (learns which emotions land for you) | generator + `style/learning.py` | ✅ **new** |
-| **Hook variants on FIRE drafts** (you pick the opener) | `pipeline/generator.py` | ✅ **new** — copilot A/B |
-| **Voice corpus** (persistent, daily-fed training set) | `style/corpus.py` + `voice_samples` | ✅ **new** — engagement-weighted selection |
-| **Genome A v2** (cadence/punctuation/openers + sentiment depth) | `style/dna.py` | ✅ **new** |
-| **Corpus suggestions** (from polled feeds, human-gated) | `style/corpus.py` + web Settings | ✅ **new** — never auto-added |
-| **Stance arc guard** (flags reversals of your past positions) | `pipeline/integrity.py` | ✅ **new** — free at cold start |
-| **Backlash simulator** (red-teams FIRE drafts) | `pipeline/integrity.py` | ✅ **new** — high-stakes only |
-| **Redo-with-steer + reject reasons** (richer feedback) | `pipeline/feedback.py` | ✅ **new** — feeds the voice |
-| Grounding shield (claims vs source, pre-review) | `pipeline/grounding.py` | ✅ — flags, never censors |
-| **Cost ledger + daily budget guard** | `pipeline/llm.py` + `claude_logs` | ✅ **new** — hard stop + one alert/day |
-| **Corpus flywheel** (posted+measured drafts train the voice) | `style/corpus.py` | ✅ **new** |
-| **Daily backups** (VACUUM INTO, rotated) | `memory.backup_db` + scheduler | ✅ **new** |
-| **Draft staleness warnings** | `pipeline/poster.py` + web | ✅ **new** |
-| Web app — React + Vite + Tailwind | `frontend/` + `api/main.py` | ✅ — FastAPI serves the built app |
-| **Supabase auth** (per-user personas, email allowlist) | `api/main.py` | ✅ **new** — JWTs verified locally |
-| Single-container deployment | `Dockerfile` (multi-stage) + `docker-compose.yml` | ✅ — one service runs everything |
-| Tests | `tests/` | ✅ 206 passing, no keys needed |
+| `youtube_captions` | Free | Default. Pulls existing CC/auto-captions |
+| `assemblyai` | Free (100 hrs/month) | Best for Indian English. Needs `ASSEMBLYAI_API_KEY` |
+| `openai` | $0.006/min | Whisper API. Needs `OPENAI_API_KEY` |
+| `local` | Free | `faster-whisper` on-device. Needs ≥1GB RAM + `ffmpeg` |
 
-## Polling intervals (chosen, env-overridable)
+Set `TRANSCRIPTION_BACKEND=assemblyai` in `.env` to upgrade. YouTube URLs try captions first; on failure (or for non-youtube_captions backend), fall back to audio. Non-YouTube URLs go directly to the audio backend.
 
-| Source | Interval | Why |
+### Reddit (20 min interval)
+Polls tracked subreddits via the Reddit JSON API (keyless locally; OAuth required on Railway to avoid datacenter 403s). The `watch/reddit_auth.py` layer handles OAuth token caching (1hr TTL). Upvote velocity from the API is stored as `velocity_hint` on each article.
+
+Set up a Reddit script-type app at `reddit.com/prefs/apps` and add `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME` to `.env`.
+
+### Google Trends (30 min interval)
+Polls trending topics per geo via `pytrends` (keyless). High-velocity trends get high `velocity_hint` scores. Configured per `trends_geo` entries in `watch_list`.
+
+### Wikipedia edit storms (60 min interval)
+Polls the Wikipedia recent-changes API. Unusual edit volume on a topic is a reliable early signal for breaking events.
+
+### Google News RSS (30 min interval)
+`watch/gnews.py` queries `https://news.google.com/rss/search?q=...` per account topic. Keyless. Covers 500+ outlets with a single query. Deduplicated across accounts (rule #8: same query → one fetch).
+
+### Moments calendar (twice daily)
+`watch/moments.py` holds 89 recurring moments (elections, budget dates, national days, IPL, quarterly results, etc.). When a moment enters its planning window, an article-equivalent is created so the drafting pipeline can prepare content proactively.
+
+### Autonomous discovery (45 min interval, optional)
+`watch/discover.py` searches YouTube and Reddit for each account's own topic keywords — no manual watch-list entry needed. Set `DISCOVER_ENABLED=true` (default) and configure `DISCOVER_MAX_QUERIES`.
+
+### Instagram (optional)
+`watch/instagram.py` pulls your own or benchmark business account's posts via the official Graph API as visual inspiration references. Auto-enabled only when `IG_GRAPH_TOKEN` is set.
+
+---
+
+## The cost filter (3 layers)
+
+Raw daily throughput: ~8,200 articles. Cost per Claude decision call: ~$0.0035 (734 input tokens × $3/MTok + ~83 output tokens × $15/MTok). Without filtering: ~$103/month. With all three layers: ~$24/month.
+
+### Layer 1: Stale skip
+Articles older than `STALE_AFTER_MIN` (default 3h) are marked scored and skipped. These are never worth a Claude call — the first-mover window has closed. Cost reduction: ~40%.
+
+### Layer 2: Keyword pre-filter
+`_account_topic_words()` builds a `frozenset` of keywords from the account's `topics` JSON array and `niche` string (stopwords removed). Before calling Claude, checks if any article word intersects the topic bag. An article about "Virat Kohli's century" is instantly skipped for an economics account. Empty topic bag → always passes (fail-safe). Cost reduction: ~30%.
+
+### Layer 3: Story dedup gate
+`_story_already_scored()` extracts keywords from the article title/description, finds related articles in the DB via `find_articles_fetched_after`, and checks if any signal already exists for this account on those articles. If 4 outlets have covered the same RBI rate hold and the first was already scored as WARM, the other 3 are skipped. One Claude call per story. Cost reduction: ~75% of remaining.
+
+Combined effect: 8,200 → ~230 Claude calls/day → ~$24/month at current throughput.
+
+Set `DAILY_BUDGET_USD=2` to cap daily spend with a Telegram alert when the cap is hit.
+
+---
+
+## Scoring (decision agent)
+
+`pipeline/decision.py` — `DecisionAgent.score_article()`
+
+Scoring is a hybrid: Claude judges the subjective dimensions; Python calculates the deterministic ones.
+
+**7 scoring dimensions (weights sum to 1.0):**
+
+| Dimension | Weight | How computed |
 |---|---|---|
-| News RSS | 15 min | TAU=60min decay → a fresh story still scores ~7.8/10 on velocity when first seen |
-| YouTube | 15 min | keyless channel upload RSS; no quota |
-| Reddit | 20 min | hot ranks move on tens-of-min; well inside the ~10 req/min keyless limit |
-| Google Trends | 30 min | trending RSS refreshes ~half-hourly; faster gets blocked |
-| Wikipedia | 60 min | edit storms build over an hour |
-| Process (score+draft) | 10 min | drains the queue in capped batches; your Claude-spend throttle |
-| Callbacks (predictions) | 60 min | free unless a new article keyword-matches an open prediction |
-| Counter-narrative | 2 h | FIRE + ≥3 related articles only; each story analyzed at most once |
-| Briefing | daily (8:00 local) | pure reads, zero Claude cost |
-| Learn (approve/reject) | 6 h | free no-op unless new reviews crossed the thresholds; then 1 Claude call |
-| Crowd (Genome B) | weekly | CLAUDE.md cadence; ~$0.01/call TwitterAPI.io + 1 Claude call per account |
-| Telegram commands | 1 min | getUpdates poll, free; only runs when TELEGRAM_* configured |
+| velocity | 0.20 | Exponential recency decay (τ=60min) — first-mover premium |
+| relevance | 0.20 | Claude: how closely does this fit the account's niche |
+| corroboration | 0.15 | Count of distinct outlets covering the same story in 6h window |
+| reaction_potential | 0.15 | Claude: does this account have something strong to say |
+| memory_leverage | 0.10 | Past stances/receipts on this topic → account can add context |
+| window_urgency | 0.10 | Recency decay (same as velocity, different formulation) |
+| historical_perf | 0.10 | Bayesian-smoothed past performance on this topic |
+
+Two multipliers applied after weighted sum:
+- **Freshness multiplier** — ≥3 recent posts on topic in 72h window suppresses score (audience fatigue)
+- **Brand safety multiplier** — for brand accounts, tragedy/divisive stories are scored down; commentators are unaffected (strength=0)
+
+**Tier thresholds:**
+- FIRE (≥8.5): push notification immediately. Draft built. First-mover window.
+- WARM (6.5–8.5): in-app card. Telegram push if phone idle 2h+.
+- COOL (4.5–6.5): added to ideas bank. Surfaced in morning briefing.
+- SKIP (<4.5): logged but not surfaced.
+
+**New story heuristic:** a single-outlet scoop gets `corroboration=5` (neutral), not penalized. A story covered by 5+ outlets gets `corroboration=10`. This prevents suppressing genuine scoops.
+
+---
+
+## Drafting pipeline
+
+`pipeline/generator.py` — `ContentGenerator.generate_checked()`
+
+**12 content formats:**
+1. `hot_take` — immediate, punchy, <15min of trigger
+2. `contradiction` — "then vs now" (most viral format)
+3. `data_story` — leads with a surprising statistic
+4. `video_reaction` — transcribes YouTube, reacts to specific claims
+5. `thread` — 3-8 tweets connecting event to larger arc
+6. `counter_narrative` — the angle nobody is covering
+7. `explainer` — "what is X and why it matters"
+8. `prediction` — stakes a clear position on what happens next
+9. `quote_context` — extracts quotable moment, adds commentary
+10. `achievement_amplifier` — party mode, amplifies wins
+11. `evergreen` — not news-tied, thought leadership
+12. `callback` — "I called this" / "I got this wrong" when prediction resolves
+
+The decision agent picks the best format per signal (stored in `signals.format`). The generator uses that as the format, falling back to `hot_take` if unset.
+
+**6-layer context package** loaded before every draft (pure SQLite, zero API cost):
+1. Historical context — related past events from `events_timeline`
+2. Stance memory — what this account has said on this topic
+3. Contradiction finder — past statements by the story's subject
+4. Data enrichment — relevant statistics from the corpus
+5. Narrative thread — which larger arc does this event fit
+6. Competitor gap — have tracked competitors posted about this
+
+**FIRE drafts get 3 alternative hooks** via `gen.alt_hooks()` — the opening line is where virality is won or lost. Hooks are stored in `posts.meta` as `alt_hooks` and shown in the review UI.
+
+**Content Squeezer** (`pipeline/repurpose.py`) — takes any approved post and generates a full multi-format content pack: LinkedIn long-form, Twitter thread (×2), quote cards (×3), newsletter, video script. Squeezer v2 decomposes the source into typed insight nodes first (one extra Claude call), then generates each draft from a single idea + angle. Set `SQUEEZE_DECOMPOSE=false` for the faster v1 path.
+
+---
+
+## Safety gates
+
+Applied in order, before a draft is saved:
+
+### Grounding check (`pipeline/grounding.py`)
+Verifies every factual claim in the draft against the source article the model was given. Flags hallucinated statistics or invented quotes. Enabled by default (`GROUNDING_ENABLED=1`).
+
+### Stance arc guard (`pipeline/integrity.py` — `StanceArcGuard`)
+Detects if the draft contradicts the account's established positions. A flip-flop is the cardinal political sin. Reads `stance_history` for the topic; only spends a Claude call if past stances exist. Enabled by default (`ARC_GUARD_ENABLED=1`).
+
+### Backlash simulator (`pipeline/integrity.py` — `RiskSimulator`)
+"How could this be screenshotted or misread against you?" Applied only to FIRE signals and inherently spicy formats. Expensive (Claude call), so intentionally narrow. Enabled by default (`RISK_CHECK_ENABLED=1`).
+
+### Persona consistency scorer (`style/scorer.py`)
+Scores the draft against the account's style DNA on 5 axes: vocabulary match, sentence rhythm, tone alignment, topic stance consistency, emotional register. Score 0–100. Threshold: 70. Below 70 → regenerate with tighter constraints. Below 60 → flag for human review. The score is stored and shown in the review UI.
+
+---
+
+## Review and posting
+
+**The system never posts to X automatically.** Every X post is reviewed by a human first. This is the permanent design — it removes bot-detection risk and keeps the human in the loop.
+
+Three review paths:
+
+### Telegram copilot (primary)
+New drafts are pushed to your phone as they're generated. Commands:
+- `/approve <id>` — approve the draft
+- `/reject <id>` — reject with implicit feedback
+- `/posted <id>` — mark as manually posted (updates engagement tracking)
+- `/perf` — recent performance stats
+- `/ideas` — COOL ideas bank
+- `/brief` — trigger morning briefing now
+
+The Telegram bot also auto-publishes approved posts to a Telegram channel (if `TELEGRAM_CHANNEL_ID` is set) — bots are first-class on Telegram.
+
+### review.py CLI
+`python review.py` — shows pending drafts in the terminal with the full post text, signal score, persona score, and alternative hooks. Interactive approve/reject.
+
+### Pulse Studio (web UI)
+`api/studio.py` — the browser-based two-zone review interface. Left zone: draft queue with one-click approve/reject/edit. Right zone: signal context (score breakdown, source article, 6-layer context summary). See [API and Pulse Studio](#api-and-pulse-studio).
+
+**Every post includes the `AI_LABEL`** (default: `🤖 AI-assisted`) appended to the final postable text. Set `AI_LABEL=` (empty) in `.env` to disable for manually polished posts.
+
+---
+
+## Style DNA system
+
+Each account has a style DNA profile — the voice fingerprint that makes generated content sound like the account, not like generic AI.
+
+### Genome A — Personal voice
+Extracted from the account's own approved posts. Stored in `style_dna`. Fields: sentence length, avg post length, sarcasm level, Hinglish mix ratio, rhetorical question frequency, caps usage, emoji style, hashtag style, signature phrases, preferred topics, things to avoid.
+
+Built via `style/dna.py` — `extract_and_store()`. Run it once on 50+ example posts from the account. Improves as more posts are approved/rejected.
+
+### Genome B — Crowd wisdom
+Weekly scrape of the niche's top posts (1000+ likes, past 7 days) via TwitterAPI.io. Claude extracts structural and linguistic patterns. Stored separately and merged with Genome A at blend ratio (default 40% crowd, 60% personal — configurable per account).
+
+`style/crowd.py` — `CrowdWisdomScraper.refresh(account)`. Requires `TWITTER_API_IO_KEY`. Runs weekly.
+
+### Learning loop (`style/learning.py`)
+Every approve/reject action is a training signal. After 10+ reviewed drafts (with at least 3 on each side), `ReviewLearner.apply_learning()` runs a Claude contrast analysis: approved drafts vs rejected drafts → what changed? → update style DNA weights. Runs every 6 hours (cheap no-op when below threshold).
+
+### Voice corpus (`style/corpus.py`)
+A curated set of the account's own posts (up to 300) plus inspiration posts from other writers (up to 10 total, capped at 50% from any single source to prevent overfit). Used as in-context examples for generation and grounding for the voice importer.
+
+### Voice importer (`style/importer.py`)
+Pastes an external writer's posts → Claude extracts the structural/linguistic patterns → imports into the account's corpus as `kind=inspiration`. Capped and source-balanced.
+
+### Brand kit (`style/brand.py`)
+Per-account visual identity: colors, fonts, logo, tagline, tone modifiers. Used by the visuals engine and the image card generator. Stored in `brand_kit` table.
+
+---
+
+## Scheduled jobs
+
+`scheduler.py` — run `python scheduler.py` to start the blocking loop.
+
+| Job | Interval | What it does |
+|---|---|---|
+| `news` | 15 min | RSS ingest across active verticals (117+ feeds) + custom feeds |
+| `youtube` | 15 min | New uploads from tracked channels + transcription |
+| `reddit` | 20 min | Tracked subreddits (OAuth on Railway, keyless locally) |
+| `trends` | 30 min | Google Trends per geo |
+| `wikipedia` | 60 min | Edit-storm detection |
+| `gnews` | 30 min | Google News RSS per account topic (keyless) |
+| `process` | 10 min | Score new articles per account + draft top FIRE/WARM signals |
+| `callbacks` | 60 min | Match open predictions against incoming articles → callback drafts |
+| `counter` | 120 min | Counter-narrative detector on heavily-covered FIRE stories |
+| `crowd` | weekly | Genome B refresh (requires TWITTER_API_IO_KEY) |
+| `learn` | 6 h | Approve/reject learning pass (no-op below threshold) |
+| `backup` | daily | VACUUM INTO SQLite snapshot, oldest pruned |
+| `moments` | 12 h | Calendar events entering planning window |
+| `discover` | 45 min | Autonomous topic discovery via YouTube + Reddit search |
+| `telegram` | 1 min | Poll for phone commands (/approve, /reject, etc.) |
+| `briefing` | daily cron | Morning digest: ideas bank, outbox nag, predictions, timing |
+
+`process` also fires once at boot (no wait for the first interval).
+
+**Concurrency:** 20-thread pool. `coalesce=True` + `max_instances=1` per job — a slow cycle never stacks overlapping runs.
+
+---
+
+## Database schema
+
+`db/schema.sql` — SQLite. Schema is additive-only after initial creation (no breaking changes without a migration in `db/migrations/`).
+
+| Table | Purpose |
+|---|---|
+| `accounts` | Per-persona settings: handle, niche, topics, verticals, regions, kind (commentator/brand/creator) |
+| `articles` | Every ingested article/video/post from all sources |
+| `scored_articles` | Per-account scoring ledger — tracks which account has seen which article |
+| `signals` | Claude's verdict per (article, account): score, tier, all 7 subscores, angle, topic, format |
+| `watch_list` | Sources to monitor: subreddits, YouTube channels, trends geos, RSS feeds, custom queries. Shared across users — one fetch per source per cycle |
+| `style_dna` | JSON style profile per account (Genome A + B + blend ratio) |
+| `voice_samples` | Account's own posts + inspiration posts for voice corpus |
+| `corpus_suggestions` | Candidate posts awaiting review before corpus addition |
+| `events_timeline` | Running log of major events by topic (historical context layer) |
+| `stance_history` | Every position this account has taken on every topic |
+| `predictions_tracker` | Predictions made, with status (open/confirmed/denied/expired) and outcome |
+| `posts` | Every generated draft — content, format, persona score, signal_id, status (draft/approved/posted/rejected) |
+| `draft_feedback` | Human approve/reject actions with optional notes (learning input) |
+| `engagement` | Likes, replies, shares per post over time (engagement feedback loop) |
+| `brand_kit` | Visual identity per account: colors, fonts, logo, tone |
+| `content_packs` | Content Squeezer output — multi-format packs per input |
+| `content_assets` | Individual assets within a content pack |
+| `content_insights` | Decomposed insight nodes (Squeezer v2) |
+| `visual_refs` | Approved background images + generated backgrounds for card reuse |
+| `claude_logs` | Every Claude API call: module, model, tokens, estimated cost, timestamp |
+| `kv_store` | Lightweight key-value store for dedup flags, alert sentinels, cached tokens |
+
+**Shared watch list:** If 500 accounts track the same YouTube channel, the channel is fetched once and the article fans out to all account scoring queues. Never fetch the same source twice per cycle.
+
+---
+
+## Source file index
+
+### Entry points
+| File | What it does |
+|---|---|
+| `scheduler.py` | Always-on polling loop — start this in production |
+| `api/main.py` | FastAPI web app — combines scheduler + Pulse Studio in one process |
+| `review.py` | Terminal-based draft review |
+| `run_pipeline.py` | One-shot manual pipeline run (useful for testing) |
+| `check_feeds.py` | Diagnostic: test all RSS feeds for availability |
+
+### `pipeline/` — the brain
+| File | What it does |
+|---|---|
+| `monitor.py` | RSS + NewsAPI ingest |
+| `decision.py` | Importance scorer (3-layer filter + Claude scoring) |
+| `context.py` | 6-layer context retriever (pure SQLite) |
+| `generator.py` | Content generation: 12 formats + alt hooks + Content Squeezer |
+| `repurpose.py` | Content Squeezer — one input → full multi-format pack |
+| `poster.py` | Telegram notifier + Telegram channel publisher |
+| `telegram_bot.py` | Phone commander (/approve, /reject, /perf, etc.) |
+| `memory.py` | All DB reads and writes |
+| `llm.py` | Claude call wrapper: budget guard + cost ledger |
+| `grounding.py` | Factual grounding check on drafts |
+| `integrity.py` | Stance arc guard + backlash simulator |
+| `fatigue.py` | Audience fatigue detector |
+| `callbacks.py` | Prediction callback watcher |
+| `counter.py` | Counter-narrative detector |
+| `briefing.py` | Morning digest generator |
+| `timing.py` | Optimal post timing engine |
+| `feedback.py` | Engagement feedback utilities |
+| `updater.py` | Style DNA updater |
+| `visuals.py` | Visual card generation (Satori/Pillow) |
+| `design.py` | AI design agent |
+| `evergreen.py` | Evergreen / opinion post generator |
+
+### `watch/` — signal watchers
+| File | What it does |
+|---|---|
+| `youtube.py` | YouTube channel monitor (keyless RSS) |
+| `reddit.py` | Reddit subreddit monitor |
+| `reddit_auth.py` | Reddit OAuth token manager |
+| `transcribe.py` | Unified transcription: 4 backends, auto-routing |
+| `trends.py` | Google Trends + Wikipedia edit storms |
+| `gnews.py` | Google News RSS per topic |
+| `discover.py` | Autonomous topic discovery |
+| `moments.py` | Calendar moments watcher |
+| `listening.py` | Custom per-account feed specs |
+| `twitter.py` | X/Twitter stub (disabled until API access) |
+| `instagram.py` | Instagram Graph API watcher |
+
+### `style/` — voice and DNA
+| File | What it does |
+|---|---|
+| `dna.py` | Style DNA extraction + storage + STOPWORDS |
+| `scorer.py` | Persona consistency scorer (5 axes, 0-100) |
+| `crowd.py` | Crowd wisdom scraper (Genome B) |
+| `learning.py` | Approve/reject learning loop |
+| `voice.py` | Genome A+B blending: `effective_for(account_id)` |
+| `corpus.py` | Voice corpus management |
+| `importer.py` | Voice importer (external writer → corpus) |
+| `brand.py` | Brand kit management |
+
+### Other
+| File | What it does |
+|---|---|
+| `config.py` | All settings — single source of truth. Import `settings` everywhere |
+| `sources.py` | Feed catalog: 117+ RSS feeds organized by vertical + region |
+| `moments.py` | 89 calendar moments with dates and planning windows |
+| `presets.py` | Content format presets |
+| `image/cards.py` | Pillow image card generator |
+| `api/studio.py` | Pulse Studio web UI backend |
+
+---
+
+## API and Pulse Studio
+
+`api/main.py` — FastAPI app. Combines the background scheduler with the REST API and the Pulse Studio UI in a single process. Start with `uvicorn api.main:app` (or let Railway handle it).
+
+**Auth modes** (auto-selected from env):
+- `supabase` — `SUPABASE_URL` + `SUPABASE_JWT_SECRET` set: real per-user accounts via Supabase, JWTs verified locally. Restrict access with `ALLOWED_EMAILS`.
+- `password` — only `APP_PASSWORD` set: shared password for a small team.
+- `dev` — nothing set: open. Local development only.
+
+**Pulse Studio** (`api/studio.py`) — the browser review interface. Two-zone layout:
+- Left: draft queue. Each card shows post content, signal tier, persona score, alternative hooks. One-click approve/reject/edit.
+- Right: context panel. Signal score breakdown, source article summary, 6-layer memory context for the signal.
+
+Also available in Studio: Brand Kit editor, Content Squeezer input, Voice Importer, corpus management.
+
+---
 
 ## Setup
 
+### Requirements
+- Python 3.11+
+- `ffmpeg` — only if using `local` transcription backend
+
+### Install
 ```bash
-python -m venv .venv && source .venv/bin/activate
+cd pulse-agent
 pip install -r requirements.txt
-cp .env.example .env        # add ANTHROPIC_API_KEY
-python -m pytest -q         # 80 passing, no keys needed
 ```
 
-## Run
+### Configure
+```bash
+cp .env.example .env
+# Edit .env — at minimum, set ANTHROPIC_API_KEY
+```
+
+### Initialize the database
+```bash
+python -c "from pipeline import memory; memory.init_db()"
+```
+
+### Seed demo accounts and watch list
+```bash
+python scheduler.py --seed
+```
+Edit the `seed()` function in `scheduler.py` to set your own subreddits, YouTube channel IDs, and account niches before relying on it.
+
+### Build Style DNA for an account
+```bash
+python -c "
+from style.dna import extract_and_store
+from pipeline import memory
+acct = memory.get_account_by_handle('your_handle')
+posts = ['post 1 text', 'post 2 text', ...]  # 50+ examples
+extract_and_store(acct['id'], posts)
+"
+```
+
+---
+
+## Running locally
 
 ```bash
-python scheduler.py --seed   # create demo personas (markets_take, politics_take) + a starter watch list
-# → then build a voice per persona: edit style/dna.py to target each handle's posts and run it
-python scheduler.py --once   # run every job ONCE (great first test; watchers need network)
-python scheduler.py          # start the always-on loop (Ctrl-C to stop)
-python review.py             # see drafts; --approve ID / --reject ID
-python review.py --outbox    # approved drafts waiting for you to post
-python review.py --posted 12 --url https://x.com/...   # close the loop
-python review.py --perf 12 --likes 120 --retweets 30 --replies 4
-python -m style.learning     # run the learning pass by hand
-python -m style.crowd        # refresh Genome B by hand (needs TWITTER_API_IO_KEY)
+# Start the full polling loop (Ctrl-C to stop)
+python scheduler.py
+
+# Or run every job once (great for testing the wiring)
+python scheduler.py --once
+
+# Start the web app (scheduler + Studio + API in one process)
+uvicorn api.main:app --reload --port 8000
+
+# Review pending drafts in the terminal
+python review.py
 ```
 
-## The web app (the non-technical-user path)
+Check feed availability:
+```bash
+python check_feeds.py
+```
 
-React + Vite + Tailwind frontend (`frontend/`), served by FastAPI. One process
-runs the dashboard, the JSON API, the image cards, AND the full scheduler
-(watchers + scorer + drafter + learning loops).
+---
+
+## Deploying to Railway
+
+The project runs as a single container on Railway. The API process (`api/main.py`) starts the background scheduler on boot.
+
+### Start command
+```
+uvicorn api.main:app --host 0.0.0.0 --port $PORT
+```
+
+### Environment variables to set in Railway
+At minimum: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DAILY_BUDGET_USD`.
+
+For Reddit (required on Railway): `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`.
+
+For auth: `APP_PASSWORD` (simple) or the full Supabase set.
+
+### SQLite persistence
+The DB file lives at `DB_PATH` (default: `agent.db` in the project root). Railway's ephemeral filesystem resets on deploy — persist the DB by attaching a Railway volume and setting `DB_PATH=/data/agent.db`. Daily backups (`job_backup`) write to `BACKUPS_DIR` (same volume). Keep `BACKUP_KEEP=7` (7 daily snapshots).
+
+---
+
+## Environment variables
+
+All variables have safe defaults — the system runs without most of them. Only `ANTHROPIC_API_KEY` is required for drafting.
 
 ```bash
-cd frontend && npm install && npm run build && cd ..   # once (Docker does this for you)
-SCHEDULER_IN_APP=1 python3 -m uvicorn api.main:app --port 8080
-# open http://localhost:8080
+# Required for drafting and scoring
+ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-sonnet-4-6        # don't change this
+
+# Cost guard (strongly recommended)
+DAILY_BUDGET_USD=2.0                   # 0 = no cap
+
+# Telegram copilot (strongly recommended — this is how you review drafts)
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+TELEGRAM_CHANNEL_ID=...               # optional: auto-publish approved posts here
+
+# News sources (optional — RSS is keyless; these add NewsAPI + GNews breadth)
+NEWS_API_KEY=...
+GNEWS_API_KEY=...
+
+# Reddit OAuth (required on Railway to avoid datacenter 403s)
+REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+REDDIT_USERNAME=...
+
+# Transcription (optional — youtube_captions is default and free)
+TRANSCRIPTION_BACKEND=youtube_captions   # or assemblyai | openai | local
+ASSEMBLYAI_API_KEY=...
+OPENAI_API_KEY=...
+WHISPER_MODEL=small                    # tiny | base | small | medium
+
+# Crowd wisdom / Genome B (optional)
+TWITTER_API_IO_KEY=...
+
+# Auth (dev mode if nothing set; password mode with APP_PASSWORD; supabase for multi-user)
+APP_PASSWORD=...
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_JWT_SECRET=...
+ALLOWED_EMAILS=...
+
+# Storage
+DB_PATH=agent.db
+BACKUPS_DIR=backups
+BACKUP_KEEP=7
+
+# Polling intervals (minutes) — defaults shown
+POLL_NEWS_MIN=15
+POLL_YOUTUBE_MIN=15
+POLL_REDDIT_MIN=20
+POLL_TRENDS_MIN=30
+POLL_WIKIPEDIA_MIN=60
+POLL_GNEWS_MIN=30
+POLL_PROCESS_MIN=10
+POLL_CALLBACKS_MIN=60
+POLL_COUNTER_MIN=120
+POLL_LEARN_MIN=360
+POLL_TELEGRAM_MIN=1
+DISCOVER_ENABLED=true
+POLL_DISCOVER_MIN=45
+
+# Scoring tuning
+STALE_AFTER_MIN=180
+PROCESS_BATCH=40
+FATIGUE_WINDOW_HOURS=72
+FATIGUE_MAX_POSTS=3
+CORROBORATION_WINDOW_MIN=360
+CORROBORATION_SATURATION=5
+
+# Safety gates (all on by default)
+GROUNDING_ENABLED=1
+ARC_GUARD_ENABLED=1
+RISK_CHECK_ENABLED=1
+
+# Visuals
+VISUALS_ENABLED=1
+VISUALS_PORT=8787
+
+# Briefing (local time)
+BRIEFING_HOUR=8
+TZ_OFFSET_MIN=330        # IST = +330
+TZ_LABEL=IST
 ```
 
-Frontend dev loop: `cd frontend && npm run dev` (Vite on :5173, proxies /api
-to :8080). A build-free fallback UI lives in `api/static/` and is served when
-no `frontend/dist` exists.
+---
 
-Tabs: **Review** (approve/reject, Open-in-X prefilled compose, card download,
-"I posted it", engagement entry), **Ideas** (COOL bank + briefing + evergreen
-button), **Analytics** (approval/format/emotion rates, learned posting
-windows), **Settings** (onboarding, accounts, paste-posts voice training,
-watch list).
+## Test suite
 
-## Auth — Supabase (recommended) or family password
-
-**Supabase mode** (real per-user accounts; each person sees their own
-personas, drafts, analytics):
-1. [supabase.com](https://supabase.com) → New project (free tier).
-2. Settings → API: copy **Project URL** → `SUPABASE_URL`, **anon key** →
-   `SUPABASE_ANON_KEY`, and JWT Settings → **JWT Secret** →
-   `SUPABASE_JWT_SECRET`.
-3. Set `ALLOWED_EMAILS=you@x.com,brother@x.com` — only these emails can use
-   the deployment, even if someone else signs up.
-4. (Optional) Authentication → Providers → Email → disable "Confirm email"
-   for instant sign-in, or leave it on and confirm via the email link.
-
-Each of you then hits the URL → **Create an account** → sign in. Personas you
-create are yours alone; personas created before Supabase mode (owner-less)
-are visible to both. The backend verifies Supabase JWTs locally — no extra
-latency, no Supabase tables needed; SQLite stays the single datastore.
-
-**Password mode**: leave the Supabase vars empty and set `APP_PASSWORD` — one
-shared password, no per-user separation. Good for trying it out.
-
-## Deploy it once, runs forever
-
-**Any VPS / home server (Docker):**
 ```bash
-cp .env.example .env    # fill ANTHROPIC_API_KEY, APP_PASSWORD, TELEGRAM_*
-docker compose up -d --build
-# http://<server>:8080 — DB + cards persist in the pulse-data volume
+pytest                    # run all tests
+pytest -x                 # stop at first failure
+pytest tests/test_decision.py   # one module
 ```
 
-**Railway (no server to manage, ~$5/mo):**
-1. Push this repo to GitHub → railway.app → New Project → Deploy from repo
-   (it detects the Dockerfile).
-2. Add a **Volume** mounted at `/data` (this is the SQLite DB — without it
-   memory resets on every deploy).
-3. Set env vars: `ANTHROPIC_API_KEY`, the Supabase four (`SUPABASE_URL`,
-   `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `ALLOWED_EMAILS`),
-   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (+ optional keys).
-4. Settings → Generate Domain → send your brother the URL. He creates his own
-   login, adds his persona, pastes his posts — fully self-serve.
+**435 tests** across 30 test files. All tests are deterministic — Claude API calls are stubbed via `conftest.StubClient`. Tests hit a real in-memory SQLite DB (via the `temp_db` fixture) for integration-level confidence.
 
-## The phone flow (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+Key test files:
+- `test_decision.py` — scoring math, keyword pre-filter, story dedup gate
+- `test_generator.py` — all 12 content formats
+- `test_scorer.py` — persona consistency scorer
+- `test_transcribe.py` — transcription routing across all 4 backends
+- `test_callbacks.py` — prediction resolution
+- `test_robustness.py` — safety gates (grounding, arc guard, backlash)
+- `test_studio.py` — Pulse Studio API endpoints
+- `test_multiaccount.py` — per-account isolation
 
-1. Draft generated → pushed to your private Telegram chat instantly.
-2. Reply `/approve 12` → bot sends the branded image card (save it to attach)
-   plus the final AI-labeled text + an `x.com/intent/post` link. Tap it:
-   X opens with the post pre-filled.
-3. **You** press Post. Reply `/posted 12` (URL optional).
-4. A day later: `/perf 12 340 80 12` — engagement feeds `historical_perf`,
-   so the scorer learns which stories are worth waking you up for.
+---
 
-Also: `/list`, `/show ID`, `/reject ID`, `/outbox`, `/help`. Only your chat id
-is obeyed; commands from anyone else are ignored.
+## What's not built yet
 
-`--seed` creates two scoped personas and a starter watch list. **Edit `seed()` in
-`scheduler.py`** to add your own YouTube channel IDs and subreddits, and set each
-persona's niche. Build a Style DNA per persona (run `style.dna` once per handle)
-so the process cycle can draft.
-
-## Twitter — why it's a stub (your call: Trends instead)
-
-Twitter/X read access is now paid ($100–5,000/mo official) and the cheap routes
-are ToS-violating, fragile scrapers. Per your instruction, **Google Trends fills
-the real-time slot** and Twitter ships as a clean pluggable interface
-(`watch/twitter.py`, disabled). To enable later: implement `fetch()` with your
-chosen API access, register accounts in `watch_list` (kind='twitter_account'),
-set `TWITTER_ENABLED=True` in `scheduler.py`.
-
-## Multi-account (the "all four verticals" answer)
-
-Each persona has `verticals` + `regions`. The process cycle scores only the
-articles in a persona's lanes, via a per-account scoring ledger (`scored_articles`)
-so two personas can each score a shared story once and never re-score. A markets
-handle never spends a Claude call on an entertainment story. This both fixes the
-one-voice problem and cuts cost.
-
-## Two principles throughout
-
-**Measure-then-judge.** Countable things computed in Python; only judgment goes to
-Claude. Reddit/Trends/Wiki expose **real engagement velocity** (upvotes/hr, traffic,
-edit bursts) → the scorer's velocity subscore is now real for those sources
-(logged `v*`), not the recency proxy (`v~`) it still uses for plain news.
-
-## Signal scoring — 7 factors + 2 multipliers
-
-Evolved from CLAUDE.md's 5-factor model. The two additions are deterministic
-and free (zero extra Claude calls):
-
-```
-velocity        20%  real where measurable; recency proxy for plain news
-relevance       20%  Claude: fit to the niche
-corroboration   15%  distinct outlets carrying the story across our own feeds
-                     (5 outlets → 10/10; fresh scoops score neutral until
-                     they've had time to echo)
-reaction_pot.   15%  Claude: does this account have a distinctive take
-memory_leverage 10%  the moat factor: past stances (2.5 each, cap 5) + an open
-                     prediction this story may resolve (4) + timeline history
-                     (0.5/event, cap 1) — receipts make a story YOURS
-window_urgency  10%  first-mover window left (recency decay)
-historical_perf 10%  topic-level ("rbi-rate-policy") → vertical → overall,
-                     Bayesian-shrunk toward 5.0
-× freshness     0.6–1.0  fatigue folded into scoring: the 4th take on one topic
-                         in 72h ranks down BEFORE Claude drafting money is spent
-× source weight 0.8–1.0  wire/national full; aggregators/social-derived less
-```
-
-Deliberate consequence: a perfect solo-source story with no receipts tops out
-in WARM (~7.75). FIRE is reserved for stories that are structurally big
-(corroborated) or that this account is uniquely positioned to win (receipts).
-Deliberately NOT added: predicted-virality vibes, controversy scores — only
-factors with real signal.
-
-**Honest placeholders.** `historical_perf` starts at a neutral 5.0 and only moves
-as your approve/reject history accumulates (Bayesian shrinkage — one approval is
-not a 10). Stale articles (older than `STALE_AFTER_MIN`, default 3h) are skipped
-at scoring so the first run doesn't burn calls on old news.
-
-## The voice corpus (training is no longer one-shot)
-
-Every writing sample lives forever in `voice_samples`; feed it daily and hit
-**Retrain voice from corpus** (web Settings, or `python -m style.corpus
---account me --retrain`). Two kinds, deliberately separated:
-
-* **own** — posts you wrote, one per line. These define the voice: every
-  measured statistic comes from these only. Optionally end a line with
-  `| likes retweets replies` — when the corpus outgrows the training cap
-  (`CORPUS_MAX_OWN`, 300), samples with measured engagement are kept first,
-  best performers ranked top, so your proven winners never age out of the
-  training set. The rest fills with the most recent.
-* **inspiration** — editorials/threads/articles you admire, each stored as one
-  whole piece. Claude distills them into `genome_a["influences"]`
-  (admired patterns + themes) as directional pull — an admired 1200-word
-  editorial never contaminates the arithmetic of your 180-char tweet voice.
-
-**Genome A v2** now captures far more than the CLAUDE.md sketch. Measured
-(deterministic, fingerprint-grade): words/sentence, short-fragment rate,
-em-dash/ellipsis/exclamation/quote rates, opener habits (number / question /
-conjunction / lowercase starts), share of posts with data. Judged (deep
-sentiment analysis): emotional palette (ranked), sentiment baseline,
-rhetorical devices actually used, argument structure (open → develop → land),
-register + code-switching. All of it renders into the generation prompt and
-the persona gate.
-
-**Corpus suggestions, human-gated:** the watchers already pull editorials and
-articles all day; pieces matching your topics + stance history are filed as
-pending suggestions (free, deterministic, max `CORPUS_SUGGEST_MAX`/run),
-surfaced in web Settings and counted in the morning briefing. Accept → enters
-the corpus as inspiration; reject → never shown again. Nothing trains the
-voice without your explicit yes — the human-in-the-loop rule applies to
-training data exactly as it does to posting.
-
-## The learning layer (how it self-improves before posting exists)
-
-Two loops, both consuming signals already captured:
-
-**Approve/reject → Genome A** (`style/learning.py`). Every `review.py` decision
-is a training example. Once `LEARN_MIN_REVIEWED` (10) drafts are actioned, the
-loop measures what separates the piles (per-format approval rates, length,
-persona-score deltas — exact, in Python), and with ≥3 examples on each side asks
-Claude WHY the rejected ones lost, phrased as style rules. Those land in
-`things_to_avoid` + a `learned_preferences` block in a NEW style_dna version —
-the generator picks them up on its next draft. Idempotent: no new reviews, no
-version churn, no Claude spend. The same history fills the decision agent's
-`historical_perf` subscore, per-vertical where evidence exists.
-
-**Crowd wisdom → Genome B** (`style/crowd.py`). Weekly, scrapes the niche's top
-posts (1000+ likes, via TwitterAPI.io) and distills the structural patterns
-being rewarded — hooks, shapes, emotional registers. `effective_genome()` folds
-them into the generation prompt at the `blend` weight (default 0.4) as
-**structure only — voice identity stays 100% Genome A**. Without
-`TWITTER_API_IO_KEY` the whole layer no-ops cleanly.
-
-## The memory moat (context retriever + updater)
-
-Every FIRE/WARM story is filed into `events_timeline` with a topic slug (free —
-the decision agent's existing Claude call now also returns the slug). Every
-post you actually publish gets one archivist call that files your **stance**
-into `stance_history` and any **verifiable prediction** into
-`predictions_tracker`. Before each draft, `pipeline/context.py` loads — with
-zero Claude calls, pure SQLite keyword match — the six layers: past events on
-the topic, positions you've already taken, contradiction material, related
-coverage, the narrative arc, and competitor gap (placeholder; needs paid X
-access). The generator is instructed to stay consistent with past stances,
-reference the arc, and never invent memory beyond what's listed. Cold start is
-honestly cold: with an empty memory, drafts are generated exactly as before;
-after a month, they remember everything. Backfill old posts anytime with
-`python -m pipeline.updater`.
-
-**Callbacks** close the loop (`pipeline/callbacks.py`, hourly): every open
-prediction is keyword-matched against newly ingested articles (free); when ≥2
-keywords overlap, one strict Claude call verifies whether the story actually
-resolves the claim — "unresolved" is the expected answer. On a hit, the
-prediction is marked confirmed/refuted and a `callback` draft lands in your
-normal review lane: "I called this" on a win, "I got this wrong" on a miss
-(owning misses is part of the brand). A per-prediction cursor means each
-article is judged at most once, and predictions expire after
-`CALLBACK_EXPIRE_DAYS` (180) so the watcher never grinds on dead claims.
-Run by hand: `python -m pipeline.callbacks`.
-
-## The robustness layer
-
-**Grounding shield** (`pipeline/grounding.py`): one cheap Claude call per
-surviving draft checks every factual claim (numbers, quotes, attributions,
-events) against the source material the model was actually given. Unsupported
-claims are listed in the draft's metadata, force `needs_review`, and shout in
-both the Telegram alert and the web card: "🚨 verify before posting". Honest
-scope: this verifies GROUNDEDNESS, not truth — no vector DB pretends
-otherwise. Opinions and predictions framed as your own bet are not claims.
-If the auditor itself fails, the draft proceeds (every draft gets human
-review anyway) with the failure logged.
-
-**Cost ledger + budget guard** (`pipeline/llm.py`): every Claude call in the
-system flows through one wrapper that logs module/model/tokens/estimated cost
-to `claude_logs` and refuses calls once today's spend crosses
-`DAILY_BUDGET_USD` (default $5) — one Telegram alert per day, watchers keep
-ingesting for free, drafting resumes at UTC midnight. Spend shows in
-/api/status and the morning briefing.
-
-**Corpus flywheel**: when you log /perf on a posted draft, its text + numbers
-auto-file into the voice corpus (origin `approved_draft`) — it was
-human-approved at posting time, so no gate is skipped. The system trains on
-its own audience-validated output; re-logging /perf updates the numbers.
-
-**Backups**: daily `VACUUM INTO` snapshot of the SQLite brain to
-`BACKUPS_DIR` (on the /data volume in Docker), keeping the last
-`BACKUP_KEEP` (7). **Staleness**: drafts older than `DRAFT_STALE_HOURS` (24)
-warn "the moment may have passed" in Telegram and show a red age chip on the
-web review card.
-
-**Stance arc guard** (`pipeline/integrity.py`): before review, a draft is
-checked against your `stance_history` on the topic — a genuine *reversal* of a
-past position is flagged ("↩️ contradicts your past stance — own the change on
-purpose") and forces review. A flip-flop is the cardinal political sin; this
-is the protection no competitor scoring "the news" generically can offer,
-because they don't know your history. Free at cold start — only spends a call
-when you actually have prior stances on the topic.
-
-**Backlash simulator** (`pipeline/integrity.py`): on FIRE and inherently-spicy
-drafts (callbacks, counter-narratives), one red-team call lists concrete ways
-the post could be screenshotted, misread, or turned against you, with a risk
-level. High risk forces review. Targeted to high-stakes drafts so spend stays
-where it matters.
-
-**Redo-with-steer + reject reasons** (`pipeline/feedback.py`): approve/reject
-is a thumbs up/down; a steer is a *direction*. `/redo 12 make it more savage`
-(Telegram), a steer box on the web card, or `review.py --redo 12 --steer
-'sharper'` rewrites the draft in place — same facts, same voice, the
-instruction applied — and re-enters the review lane. Every steer and every
-`/reject 12 too preachy` reason is recorded and fed into the learning loop's
-next pass, so a recurring "more savage" becomes a standing preference. The
-biggest day-to-day quality lever: every rejection becomes a lesson instead of
-a dead end.
-
-> Ideas we evaluated and deliberately parked (knowledge graph, live-stream
-> interceptor, opponent mirror, …) live in [DEFERRED.md](DEFERRED.md) with the
-> reason and the trigger that would make each worth building. The full
-> built-vs-planned status of every original-spec + Grok-suggested feature is
-> tracked in [CLAUDE.md](CLAUDE.md) (the living build spec).
-
-## The intelligence layer (CLAUDE.md's 12, scored honestly)
-
-Built: timing engine (#1), emotion calibration (#4), counter-narrative (#5),
-thread-vs-single via per-signal format choice (#6), fatigue detector (#7),
-persona scorer (#10), hook variants (#3, copilot version: you pick, no posting
-algorithm), plus trend velocity (#2) partially — real velocity from
-Reddit/Trends/Wiki, recency proxy for plain news.
-
-Blocked on paid API access: reply intelligence (#8), cross-platform
-amplification (#9), competitor gap (#11), growth forecaster (#12 — needs
-follower history that only an API can read).
-
-## Not built yet (roadmap)
-
-1. **Automated engagement reads** — `/perf` is manual entry; an X API reader
-   (when worth paying for) would append to the same `engagement` table.
-2. **X API posting** — deliberately skipped (bot-flagging risk + paid API).
-   If ever wanted, `post_to_x()` lands in `pipeline/poster.py`; the
-   draft→approved→posted lifecycle already supports it unchanged.
-3. **Blocked intelligence features** (above) + **YouTube view-velocity** +
-   **Twitter watch** — paid/keyed API access. (Transcription is NOT blocked
-   anymore: YouTube's own captions are fetched keylessly; Whisper only ever
-   mattered for videos without captions.)
-4. **Productization** — SaaS layer (Sessions 17-26), Party mode (27-32),
-   multi-platform (LinkedIn/Threads/WhatsApp). Deferred until selling.
-
-All 12 CLAUDE.md formats now exist. The four "special" ones are produced by
-their own triggers, not the per-signal chooser: callback (predictions watcher),
-counter_narrative (the detector), video_reaction (auto for YouTube uploads
-with a transcript), evergreen (/evergreen on Telegram or
-`python -m pipeline.evergreen` — picks your most-recurring stance topic,
-with a 14-day repeat guard).
-
-Schema locked (rule #7); changes are additive via the auto-migration in `memory.init_db`.
+- **X/Twitter posting API** — `watch/twitter.py` is a stub. Intentional: the copilot flow (Telegram → copy to X) is lower-risk. Wire when you have API access.
+- **LinkedIn + Threads posting** — content is generated for these formats; the posting API layer is not built.
+- **WhatsApp Business API** — not started.
+- **Party mode** — 100-variant generator, worker account manager, war room analytics, opponent monitoring. Designed in CLAUDE.md; not built.
+- **Stripe billing** — not started.
+- **Per-user data isolation for multi-tenant SaaS** — the auth layer exists; data partitioning for multiple paying customers isn't fully implemented.
+- **Fine-tuned model per customer** — the training data moat is being built (style DNA, engagement feedback, voice corpus); the fine-tuning step is a V2 item.
