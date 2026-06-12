@@ -73,10 +73,10 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     if "pack_id" not in post_cols:
         conn.execute("ALTER TABLE posts ADD COLUMN pack_id INTEGER")
     sig_cols = {r["name"] for r in conn.execute("PRAGMA table_info(signals)")}
-    for col in ("topic", "format"):
+    for col in ("topic", "format", "sensitivity"):
         if col not in sig_cols:
             conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")
-    for col in ("corroboration", "memory_leverage"):
+    for col in ("corroboration", "memory_leverage", "brand_safety"):
         if col not in sig_cols:
             conn.execute(f"ALTER TABLE signals ADD COLUMN {col} REAL")
     pred_cols = {r["name"] for r in conn.execute("PRAGMA table_info(predictions_tracker)")}
@@ -85,6 +85,12 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     vs_cols = {r["name"] for r in conn.execute("PRAGMA table_info(voice_samples)")}
     if vs_cols and "source" not in vs_cols:
         conn.execute("ALTER TABLE voice_samples ADD COLUMN source TEXT")
+    pack_cols = {r["name"] for r in conn.execute("PRAGMA table_info(content_packs)")}
+    if pack_cols:
+        if "asset_id" not in pack_cols:
+            conn.execute("ALTER TABLE content_packs ADD COLUMN asset_id INTEGER")
+        if "idea" not in pack_cols:
+            conn.execute("ALTER TABLE content_packs ADD COLUMN idea TEXT")
     bk_cols = {r["name"] for r in conn.execute("PRAGMA table_info(brand_kit)")}
     if bk_cols:
         for col in ("accent_color", "secondary_color", "bg_style", "font_family",
@@ -281,7 +287,10 @@ def get_unscored_for_account(
     clauses = ["a.id NOT IN (SELECT article_id FROM scored_articles WHERE account_id = ?)"]
     params: list[Any] = [account["id"]]
     if verticals:
-        clauses.append("a.vertical IN (%s)" % ",".join("?" * len(verticals)))
+        # NULL vertical = lane-less item (trends spike, wiki storm, moment):
+        # visible to every account, same contract as NULL region below.
+        clauses.append("(a.vertical IN (%s) OR a.vertical IS NULL)"
+                       % ",".join("?" * len(verticals)))
         params += verticals
     if regions:
         clauses.append("(a.region IN (%s) OR a.region IS NULL)" % ",".join("?" * len(regions)))
@@ -310,8 +319,8 @@ def insert_signal(signal: dict[str, Any], db_path: Optional[str] = None) -> int:
     """Upsert a signal for (article_id, account_id); re-scoring overwrites."""
     cols = ("article_id", "account_id", "score", "tier", "velocity", "relevance",
             "corroboration", "reaction_potential", "memory_leverage",
-            "window_urgency", "historical_perf", "angle", "topic", "format",
-            "reasoning")
+            "window_urgency", "historical_perf", "brand_safety", "sensitivity",
+            "angle", "topic", "format", "reasoning")
     params = {c: signal.get(c) for c in cols}
     params["created_at"] = signal.get("created_at") or _now()
     with get_conn(db_path) as conn:
@@ -319,11 +328,12 @@ def insert_signal(signal: dict[str, Any], db_path: Optional[str] = None) -> int:
             """INSERT INTO signals
                (article_id, account_id, score, tier, velocity, relevance,
                 corroboration, reaction_potential, memory_leverage,
-                window_urgency, historical_perf, angle, topic, format,
-                reasoning, created_at)
+                window_urgency, historical_perf, brand_safety, sensitivity,
+                angle, topic, format, reasoning, created_at)
                VALUES (:article_id, :account_id, :score, :tier, :velocity,
                        :relevance, :corroboration, :reaction_potential,
                        :memory_leverage, :window_urgency, :historical_perf,
+                       :brand_safety, :sensitivity,
                        :angle, :topic, :format, :reasoning, :created_at)
                ON CONFLICT(article_id, account_id) DO UPDATE SET
                    score=excluded.score, tier=excluded.tier,
@@ -333,6 +343,8 @@ def insert_signal(signal: dict[str, Any], db_path: Optional[str] = None) -> int:
                    memory_leverage=excluded.memory_leverage,
                    window_urgency=excluded.window_urgency,
                    historical_perf=excluded.historical_perf,
+                   brand_safety=excluded.brand_safety,
+                   sensitivity=excluded.sensitivity,
                    angle=excluded.angle, topic=excluded.topic,
                    format=excluded.format, reasoning=excluded.reasoning,
                    created_at=excluded.created_at""",
@@ -419,17 +431,159 @@ def get_brand_kit(account_id: int, db_path: Optional[str] = None) -> Optional[di
         return d
 
 
+# --------------------------------------------------------------------------- #
+# Visual references (VISUALS.md Phase V2 — the design agent's asset library)
+# --------------------------------------------------------------------------- #
+def add_visual_ref(account_id: int, kind: str = "background",
+                   path: Optional[str] = None, url: Optional[str] = None,
+                   notes: Optional[str] = None, tags: Optional[list] = None,
+                   db_path: Optional[str] = None) -> int:
+    with get_conn(db_path) as conn:
+        cur = conn.execute(
+            """INSERT INTO visual_refs (account_id, kind, path, url, notes,
+                                        tags, active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
+            (account_id, kind, path, url, notes,
+             json.dumps(tags or []), _now()),
+        )
+        return cur.lastrowid
+
+
+def get_visual_refs(account_id: int, kind: Optional[str] = None,
+                    db_path: Optional[str] = None) -> list[dict]:
+    q = "SELECT * FROM visual_refs WHERE account_id = ? AND active = 1"
+    params: list[Any] = [account_id]
+    if kind:
+        q += " AND kind = ?"; params.append(kind)
+    q += " ORDER BY id DESC"
+    with get_conn(db_path) as conn:
+        rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+    for r in rows:
+        try:
+            r["tags"] = json.loads(r["tags"]) if r["tags"] else []
+        except (json.JSONDecodeError, TypeError):
+            r["tags"] = []
+    return rows
+
+
+def remove_visual_ref(ref_id: int, db_path: Optional[str] = None) -> None:
+    with get_conn(db_path) as conn:
+        conn.execute("UPDATE visual_refs SET active = 0 WHERE id = ?", (ref_id,))
+
+
+def generated_images_today(db_path: Optional[str] = None) -> int:
+    """How many AI backgrounds were generated today (the paid-call cap)."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS n FROM visual_refs
+               WHERE kind = 'generated' AND created_at >= ?""",
+            (today,),
+        ).fetchone()
+        return row["n"]
+
+
 def create_content_pack(account_id: int, source_title: Optional[str],
                         source_url: Optional[str], source_excerpt: Optional[str],
+                        asset_id: Optional[int] = None, idea: Optional[str] = None,
                         db_path: Optional[str] = None) -> int:
     with get_conn(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO content_packs
-               (account_id, source_title, source_url, source_excerpt, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (account_id, source_title, source_url, source_excerpt, _now()),
+               (account_id, source_title, source_url, source_excerpt,
+                asset_id, idea, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (account_id, source_title, source_url, source_excerpt,
+             asset_id, idea, _now()),
         )
         return cur.lastrowid
+
+
+def save_content_asset(account_id: int, raw_content: str, title: Optional[str] = None,
+                       source_type: str = "paste", source_url: Optional[str] = None,
+                       db_path: Optional[str] = None) -> int:
+    """File a source into the content library. Re-squeezing the same URL
+    reuses the existing asset rather than duplicating the blob."""
+    with get_conn(db_path) as conn:
+        if source_url:
+            row = conn.execute(
+                "SELECT id FROM content_assets WHERE account_id = ? AND source_url = ?",
+                (account_id, source_url)).fetchone()
+            if row:
+                return row["id"]
+        cur = conn.execute(
+            """INSERT INTO content_assets
+               (account_id, title, source_type, source_url, raw_content, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (account_id, title, source_type, source_url, raw_content, _now()),
+        )
+        return cur.lastrowid
+
+
+def get_content_asset(asset_id: int, db_path: Optional[str] = None) -> Optional[dict]:
+    with get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM content_assets WHERE id = ?",
+                           (asset_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_content_assets(account_id: int, db_path: Optional[str] = None) -> list[dict]:
+    """The asset library, newest first, without the raw blobs."""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT a.id, a.title, a.source_type, a.source_url, a.created_at,
+                      LENGTH(a.raw_content) AS chars,
+                      (SELECT COUNT(*) FROM content_insights i
+                        WHERE i.asset_id = a.id AND i.kind = 'idea') AS ideas,
+                      (SELECT COUNT(*) FROM posts p JOIN content_packs cp
+                        ON p.pack_id = cp.id WHERE cp.asset_id = a.id) AS drafts
+               FROM content_assets a WHERE a.account_id = ?
+               ORDER BY a.id DESC""", (account_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_insights(asset_id: int, account_id: int, insights: dict,
+                  db_path: Optional[str] = None) -> int:
+    """Persist a decomposition as graph nodes. Replaces any earlier
+    decomposition of the same asset (re-squeezing re-decomposes)."""
+    n = 0
+    with get_conn(db_path) as conn:
+        conn.execute("DELETE FROM content_insights WHERE asset_id = ?", (asset_id,))
+        for kind in ("idea", "claim", "story", "statistic", "quote", "opinion"):
+            for item in insights.get(kind + "s") or insights.get(kind) or []:
+                if isinstance(item, dict):
+                    text = (item.get("text") or item.get(kind) or
+                            item.get("idea") or "").strip()
+                    angles = item.get("angles")
+                else:
+                    text, angles = str(item).strip(), None
+                if not text:
+                    continue
+                conn.execute(
+                    """INSERT INTO content_insights
+                       (asset_id, account_id, kind, text, angles_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (asset_id, account_id, kind, text,
+                     json.dumps(angles) if angles else None, _now()))
+                n += 1
+    return n
+
+
+def get_insights(asset_id: int, kind: Optional[str] = None,
+                 db_path: Optional[str] = None) -> list[dict]:
+    q = "SELECT * FROM content_insights WHERE asset_id = ?"
+    params: list = [asset_id]
+    if kind:
+        q += " AND kind = ?"
+        params.append(kind)
+    with get_conn(db_path) as conn:
+        rows = conn.execute(q + " ORDER BY id", params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["angles"] = json.loads(d["angles_json"]) if d["angles_json"] else []
+            out.append(d)
+        return out
 
 
 def set_post_pack(post_id: int, pack_id: int, db_path: Optional[str] = None) -> None:

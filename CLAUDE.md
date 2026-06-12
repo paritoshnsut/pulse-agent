@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **297 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **371 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -70,11 +70,14 @@ needed.
 
 | Source | Status | Interval | Notes |
 |---|---|---|---|
-| News RSS (65 feeds, 4 verticals, IN/US) | ✅ | 15 min | per-source weighting (wire/national vs aggregator) |
+| News RSS (107 feeds, 10 verticals incl. culture/marketing/lifestyle, IN/US) | ✅ | 15 min | per-source weighting (wire/national vs aggregator) |
+| **Per-brand listening** (custom `rss_feed` + `news_query` watch rows → Google News RSS) | ✅ | 15 min | keyless social-listening-lite: competitors, category, own mentions; merged into the news cycle, catalog wins dedup |
+| **Moments calendar** (89 planned moments: festivals, retail, sport, awareness days) | ✅ | 12 h | date-rule engine (fixed/nth-weekday/offset/lookup); lunar dates from lookup tables, never guessed; surfaces at each moment's lead time |
 | YouTube (channel upload RSS + transcripts) | ✅ | 15 min | keyless; transcript unlocks `video_reaction` |
 | Reddit (real upvote velocity) | ✅ | 20 min | keyless JSON |
 | Google Trends | ✅ | 30 min | keyless RSS, real traffic velocity |
 | Wikipedia edit-storms | ✅ | 60 min | keyless |
+| Instagram (own account + inspiration shape) | 🟡 | 30 min | stub, auto-enables with `IG_GRAPH_TOKEN`; inspiration refs flow via uploads meanwhile |
 | Twitter/X read | ❌ | — | pluggable stub; paid API ($100–5,000/mo). Trends fills the slot. |
 | YouTube view-velocity | ❌ | — | needs YouTube Data API quota |
 
@@ -229,14 +232,17 @@ for any brand, creator, or business.** Shipped in v1; the rest is the roadmap.
 | Feature | Status | Notes |
 |---|---|---|
 | **De-politicized engine** | ✅ | decision agent reframed for person/brand/creator; account `kind`; vertical **presets** (SaaS, D2C, creator, finance, fitness, local, agency, political) prefill onboarding |
-| **Content Squeezer (repurpose)** | ✅ | one input (blog/podcast/launch/newsletter; paste or URL) → a pack of platform-shaped drafts (LinkedIn post, threads, standalone insights, newsletter, video script). Zero polling setup; the blank-page killer. |
+| **Content Squeezer v2 (content graph)** | ✅ | one input (paste, URL, or **YouTube link** via keyless captions) → filed into a re-squeezable **asset library** (`content_assets`) → ONE decompose call extracts typed insight nodes (ideas+angles, claims, stories, statistics, quotes, opinions → `content_insights`) → each draft generated from ONE idea + ONE angle with supporting nodes, grouped into a **pack per idea**. Deterministic **novelty flag** ("you covered this on …") — flag, never block. Fail-safe to the v1 whole-source squeeze. |
+| **One-paste voice onboarding** | ✅ | `style/importer.py`: paste one blog/Substack URL → feed discovery → corpus import → auto-retrain at ≥5 own samples → niche/topics autofilled from the judged genome (never overwrites an explicit choice). Twitter/LinkedIn deliberately not scraped (ToS + paid APIs); paste box remains that path. |
+| **Pulse Studio (internal two-zone UI)** | ✅ | one React build, two faces. **App** zone (indigo) = the customer product: Home/Review/Repurpose/Ideas/Analytics/Settings. **Studio** zone (amber, sidebar toggle, persisted) = the glass wall for employees: Mission Control (pipeline funnel ingested→posted + tiers + spend by module + source health), Signal Center (all 7 subscores + reasoning per story), Memory Inspector (searchable stances/predictions/events), Voice Studio (genome A/B + corpus + top samples), Learning Dashboard (approval rates by format/emotion, learned rules, feedback notes), Generation Inspector (any draft's full trace: signal → article → idea/angle → guards → engagement), Content Graph viewer. Backend: `api/studio.py` router factory — 8 read-only endpoints over existing tables, zero Claude cost, same auth + ownership as the app. |
 | **Text Brand Kit** | ✅ | banned words, preferred swaps ("cheap"→"affordable"), disclaimers, default CTA, brand notes — injected into generation AND enforced deterministically; off-brand drafts flagged. Applies on every generation path via `style/voice.py`. |
 | Multi-platform native output + scheduling | ⏸ | LinkedIn/Instagram/Threads APIs (brand pages permit scheduled posting — unlike personal X). Phase 2. |
 | Trigger-to-Content (webhooks: GitHub/Shopify/Stripe/calendar) | ⏸ | generalizes the watch layer to business events. Phase 2. |
 | Agency mode + magic-link client approvals | ⏸ | the lucrative multi-seat segment. Phase 3. |
 | Content calendar / campaign planner | ⏸ | cadence + themes + "fill my week". Phase 3. |
 | **Visual generation V1 (Satori)** | ✅ | branded PNGs on every approval: quote/stat/insight templates, brand colors/fonts/watermark, persistent localhost Node renderer (no browser), Pillow fail-safe. Full plan + phases in `VISUALS.md`. |
-| Visuals V1.5 (carousel, logo embed, preview) + V2 (AI-imagery design agent) | ⏸ | tracked step-by-step in `VISUALS.md` |
+| **Visuals V2a (AI-imagery design agent)** | ✅ | `pipeline/design.py`: image backend interface (keyless library of uploaded refs + paid gpt-image-1 behind a daily cap), brand-kit prompt builder, generate → Claude-vision-critique → regenerate loop, `hero_card` composite (imagery under, Satori text on top). Fail-safe to flat cards. Details in `VISUALS.md`. |
+| Visuals V2b (visual preference learning, IG inspiration → refs) | ⏸ | tracked in `VISUALS.md` |
 | Social listening (tamed lead-gen — copilot reply, never auto-spam) | ⏸ | needs paid social read; auto-reply-to-strangers deliberately refused. |
 
 ## Party mode (enterprise) — all ⏸ deferred
@@ -289,16 +295,21 @@ refuse on principle; a model can't feel virality from text.
 ```
 pipeline/   monitor decision context generator scorer poster telegram_bot
             updater callbacks counter evergreen fatigue timing briefing
-            grounding integrity feedback llm repurpose memory
-style/      dna corpus crowd learning scorer brand voice
-watch/      youtube reddit trends twitter(stub)
-image/      cards
-presets.py  onboarding starter packs            sources.py  65-feed catalog
-api/        main.py (+ static fallback)         frontend/  React app
-db/         schema.sql                          tests/     297 tests
+            grounding integrity feedback llm repurpose memory visuals design
+style/      dna corpus crowd learning scorer brand voice importer
+watch/      youtube reddit trends listening moments twitter(stub) instagram(stub)
+render/     Node satori service + templates     image/     cards (Pillow fail-safe)
+moments.py  date-rule engine + 89-moment calendar
+presets.py  onboarding starter packs            sources.py  107-feed catalog
+api/        main.py (+ static fallback), studio.py (internal glass-wall API)
+frontend/   React app — two zones: App (customer) + Studio (pages/studio/)
+db/         schema.sql                          tests/     371 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
+VISUALS.md   the visual system's own status doc
 ```
 
-*Last updated: integrity layer (arc guard, backlash sim, redo-with-steer) +
-this status doc. Keep this file current as the source of truth for "what's
-actually built."*
+*Last updated: Pulse Studio — the two-zone UI redesign. One build, two faces:
+the customer App (what should I post?) and the internal Studio (what is the
+machine doing and why?) with Mission Control, Signal Center, Memory Inspector,
+Voice Studio, Learning Dashboard, Generation Inspector, and the Content Graph.
+Keep this file current as the source of truth for "what's actually built."*

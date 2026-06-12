@@ -32,10 +32,11 @@ function DraftCard({ p, refresh }) {
       { method: 'POST', body: { reason: rejectReason || null } });
     refresh();
   };
-  const redo = async () => {
-    if (!steer.trim()) return;
+  const redo = async (instruction) => {
+    const inst = (typeof instruction === 'string' ? instruction : steer).trim();
+    if (!inst) return;
     setBusy(true); setMsg('');
-    try { await api(`/api/drafts/${p.id}/redo`, { method: 'POST', body: { instruction: steer } });
+    try { await api(`/api/drafts/${p.id}/redo`, { method: 'POST', body: { instruction: inst } });
           setSteer(''); refresh(); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
@@ -71,6 +72,28 @@ function DraftCard({ p, refresh }) {
         )}
       </div>
       <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{p.content}</div>
+      {p.why && (p.why.angle || p.why.source_title) && (
+        <div className="mt-2 text-xs text-zinc-500 leading-relaxed">
+          <span className="text-zinc-400 font-medium">why this draft: </span>
+          {p.why.score != null && <>scored {p.why.score}/10{p.why.tier ? ` (${p.why.tier})` : ''} · </>}
+          {p.why.angle && <>{p.why.angle} </>}
+          {p.why.source_title && (
+            <>· from {p.why.source_url
+              ? <a href={p.why.source_url} target="_blank" rel="noreferrer"
+                   className="text-sky-500 hover:underline">
+                  {p.why.source_name || 'source'}: {p.why.source_title}
+                </a>
+              : `${p.why.source_name || 'source'}: ${p.why.source_title}`}</>
+          )}
+        </div>
+      )}
+      {meta.idea && (
+        <div className="mt-2 text-xs text-zinc-500 leading-relaxed">
+          <span className="text-zinc-400 font-medium">from your content: </span>
+          💡 {meta.idea}{meta.angle ? <> · <span className="italic">{meta.angle}</span></> : null}
+          {meta.novelty && <span className="text-amber-400"> · ⚠ {meta.novelty}</span>}
+        </div>
+      )}
       {ungrounded.length > 0 && (
         <div className="mt-3 rounded-lg border border-rose-800 bg-rose-950/50 p-3 text-sm">
           <div className="font-medium text-rose-300">
@@ -125,6 +148,15 @@ function DraftCard({ p, refresh }) {
 
       {phase === 'draft' && (
         <div className="mt-4 space-y-2">
+          <div className="flex gap-1.5 flex-wrap">
+            {['sharper', 'funnier', 'more contrarian', 'shorter', 'softer'].map((s) => (
+              <button key={s} disabled={busy} onClick={() => redo(`make it ${s}`)}
+                className="px-2.5 py-1 rounded-full text-xs bg-zinc-800 text-zinc-300
+                           hover:bg-zinc-700 disabled:opacity-50">
+                ↻ {s}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2 items-center">
             <Input placeholder="steer it: 'more savage', 'lead with the number', 'too soft'"
                    value={steer} onInput={(e) => setSteer(e.target.value)}

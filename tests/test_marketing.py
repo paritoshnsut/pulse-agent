@@ -3,8 +3,11 @@
 
 import json
 
+import pytest
+
 from conftest import StubClient, _Msg
 from pipeline import memory
+from pipeline import decision
 from style import brand as brand_mod
 from style import voice
 
@@ -102,20 +105,23 @@ def test_content_squeezer_makes_a_pack(temp_db):
     acct_id = memory.upsert_account(handle="brand", kind="brand", db_path=temp_db)
     memory.save_style_dna(acct_id, genome_a={"tone": "warm"}, db_path=temp_db)
     account = memory.get_account(acct_id, db_path=temp_db)
-    # enough payloads for the plan (8 drafts) — SeqStub repeats {} after, but
-    # plan-limited; give plenty
-    stub = SeqStub(*([SQUEEZE_DRAFT] * 20))
+    # first payload answers the decompose call with no usable ideas, which
+    # exercises the fail-safe v1 (whole-source) path; the rest are drafts
+    stub = SeqStub("{}", *([SQUEEZE_DRAFT] * 20))
     source = "Our new feature ships today. " * 20
     # shrink the plan so the test is fast and deterministic
     out = ContentSqueezer(client=stub, db_path=temp_db).squeeze(
         account, text=source, title="Launch day",
         plan=[("linkedin_post", 1), ("thread", 1), ("newsletter", 1)])
-    assert out["ok"] is True and out["pack_id"]
+    assert out["ok"] is True and out["pack_id"] and out["mode"] == "direct"
     posts = memory.get_pack_posts(out["pack_id"], db_path=temp_db)
     assert len(posts) == 3
     assert {p["format"] for p in posts} == {"linkedin_post", "thread", "newsletter"}
+    # the source was filed into the asset library
+    asset = memory.get_content_asset(out["asset_id"], db_path=temp_db)
+    assert asset and asset["raw_content"].startswith("Our new feature")
     # the source was passed as grounding context, not invented
-    gen_prompt = stub.calls[0]["messages"][0]["content"]
+    gen_prompt = stub.calls[1]["messages"][0]["content"]
     assert "SOURCE CONTENT TO REPURPOSE" in gen_prompt
 
 
@@ -147,6 +153,61 @@ def test_account_kind_persists_and_reaches_decision_prompt(temp_db):
     DecisionAgent(client=stub).judge({"title": "x"}, {"kind": "brand", "niche": "saas"})
     prompt = stub.messages.calls[0]["messages"][0]["content"]
     assert "ACCOUNT TYPE: brand" in prompt
+
+
+# ------------------------------------------------------------ brand safety
+def test_brand_safety_multiplier_scales_by_kind():
+    from pipeline.decision import brand_safety_multiplier as m
+    # commentator: politics SHOULD react to hard news -> never suppressed
+    assert m(0.0, "commentator") == 1.0
+    assert m(10.0, "commentator") == 1.0
+    # a brand on a totally safe item is untouched; on a tragedy hits the floor
+    assert m(10.0, "brand") == 1.0
+    assert m(0.0, "brand") == 0.25            # brand_safety_floor
+    # creator is held half as hard as a brand
+    assert m(0.0, "creator") == pytest.approx(1.0 - 0.5 * (1 - 0.25))   # 0.625
+    # unknown kind -> no surprise suppression
+    assert m(0.0, None) == 1.0 and m(0.0, "journalist") == 1.0
+
+
+def test_judge_parses_brand_safety_and_sensitivity():
+    payload = json.dumps({"relevance": 6, "reaction_potential": 5, "angle": "",
+                          "topic": "t", "brand_safety": 2, "sensitivity": "tragedy",
+                          "reasoning": ""})
+    out = decision.DecisionAgent(client=StubClient(payload)).judge(
+        {"title": "x"}, {"kind": "brand"})
+    assert out["brand_safety"] == 2.0 and out["sensitivity"] == "tragedy"
+    # missing brand_safety -> fail open at the safe score (never silently suppress)
+    out2 = decision.DecisionAgent(client=StubClient("garbage")).judge({"title": "x"}, {})
+    assert out2["brand_safety"] == 7.0   # brand_safety_safe_score default
+
+
+def test_brand_account_suppressed_on_unsafe_story_commentator_is_not(temp_db):
+    from datetime import datetime, timezone
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    brand_id = memory.upsert_account(handle="brand", kind="brand", db_path=temp_db)
+    comm_id = memory.upsert_account(handle="comm", kind="commentator", db_path=temp_db)
+    # same hot, relevant, fresh story — but brand-unsafe (a tragedy)
+    payload = json.dumps({"relevance": 9, "reaction_potential": 9, "angle": "a",
+                          "topic": "factory-fire", "brand_safety": 1,
+                          "sensitivity": "tragedy", "reasoning": "r"})
+    art_id, _ = memory.insert_article(
+        {"source": "rss", "url": "https://t/fire", "title": "Factory fire kills 20",
+         "published_at": now.isoformat()}, db_path=temp_db)
+    article = {"id": art_id, "title": "Factory fire kills 20",
+               "published_at": now.isoformat()}
+    agent = decision.DecisionAgent(client=StubClient(payload))
+    brand_sig = agent.score_article(article, {"id": brand_id, "kind": "brand"},
+                                    now=now, db_path=temp_db)
+    comm_sig = agent.score_article(article, {"id": comm_id, "kind": "commentator"},
+                                   now=now, db_path=temp_db)
+    # the commentator is untouched; the brand is heavily suppressed
+    assert comm_sig["brand_safety_mult"] == 1.0
+    assert brand_sig["brand_safety_mult"] < 0.4
+    assert brand_sig["score"] < comm_sig["score"]
+    assert brand_sig["sensitivity"] == "tragedy"
+    # and it persists on the signal row
+    memory.insert_signal(brand_sig, db_path=temp_db)
 
 
 def test_presets_available():

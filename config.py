@@ -68,6 +68,28 @@ class Settings:
     # 0-1 recent posts on topic -> x1.0, 2 -> x0.85, >= fatigue_max_posts -> floor. ---
     freshness_floor: float = float(os.getenv("FRESHNESS_FLOOR", "0.6"))
 
+    # --- Brand-safety multiplier on the composite (the third multiplier, after
+    # freshness + source weight). A political commentator SHOULD react to a
+    # tragedy or a divisive story; a brand jumping on one looks tone-deaf or
+    # exploitative. So the same item is suppressed by HOW MUCH the account's
+    # `kind` cares about brand safety: a brand fully, a creator half, a
+    # commentator not at all. The brand_safety subscore (0-10, 10 = a brand can
+    # post about this with zero risk) is judged FOR FREE inside the existing
+    # decision call — no extra Claude spend, same measure-then-judge posture.
+    #   multiplier = 1 - strength * (1 - raw); raw scales the safety score from
+    #   the floor (at safety 0) up to 1.0 (at safety >= safe_score). strength 0
+    #   (commentator) => always 1.0, i.e. the feature is invisible to politics.
+    brand_safety_enabled: bool = os.getenv("BRAND_SAFETY_ENABLED", "1").lower() not in ("0", "false", "")
+    brand_safety_floor: float = float(os.getenv("BRAND_SAFETY_FLOOR", "0.25"))
+    brand_safety_safe_score: float = float(os.getenv("BRAND_SAFETY_SAFE_SCORE", "7.0"))
+    # How hard each account kind is held to brand safety. Unknown kinds -> 0.0
+    # (never surprise a persona with suppression it didn't opt into).
+    brand_safety_strength: dict = field(default_factory=lambda: {
+        "brand": 1.0,
+        "creator": 0.5,
+        "commentator": 0.0,
+    })
+
     # --- Urgency tier cutoffs (composite score is 0-10). From CLAUDE.md. ---
     tier_fire: float = 8.5   # >= -> FIRE
     tier_warm: float = 6.5   # >= -> WARM
@@ -205,6 +227,15 @@ class Settings:
     # fall back to a single card rather than a thin two-slide carousel.
     carousel_max_slides: int = int(os.getenv("CAROUSEL_MAX_SLIDES", "6"))
     carousel_slide_chars: int = int(os.getenv("CAROUSEL_SLIDE_CHARS", "300"))
+    # --- Visuals V2: the AI-imagery design agent (VISUALS.md Phase V2).
+    # Default backend "library" is keyless: it picks from the account's
+    # uploaded approved backgrounds (visual_refs). "openai" enables paid
+    # generation (gpt-image-1, needs OPENAI_API_KEY) behind a hard per-day
+    # cap; every generated background is kept in visual_refs for free reuse. ---
+    imagegen_backend: str = os.getenv("VISUALS_IMAGEGEN", "library").lower()
+    imagegen_daily_cap: int = int(os.getenv("VISUALS_IMAGE_DAILY_CAP", "12"))
+    design_max_iters: int = int(os.getenv("DESIGN_MAX_ITERS", "2"))
+    design_accept_score: float = float(os.getenv("DESIGN_ACCEPT_SCORE", "7.0"))
 
     # --- Content Squeezer (repurpose one input into a multi-format pack).
     # Each tuple is (format, count). Text-only formats — multi-platform APIs
@@ -217,6 +248,11 @@ class Settings:
         ("video_script", 1),
     )
     repurpose_max_chars: int = int(os.getenv("REPURPOSE_MAX_CHARS", "12000"))
+    # Squeezer v2 (the content graph): decompose the source into typed insight
+    # nodes first, then generate each draft from ONE idea + ONE angle. Costs a
+    # single extra Claude call per squeeze; off (or any failure) = v1 path.
+    squeeze_decompose: bool = os.getenv("SQUEEZE_DECOMPOSE", "true").lower() == "true"
+    squeeze_max_ideas: int = int(os.getenv("SQUEEZE_MAX_IDEAS", "3"))
 
     # --- Audience fatigue detector: don't draft the Nth take on one topic ---
     fatigue_window_hours: int = int(os.getenv("FATIGUE_WINDOW_HOURS", "72"))

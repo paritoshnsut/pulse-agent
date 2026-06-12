@@ -40,7 +40,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Header
+from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException,
+                     UploadFile)
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -173,6 +174,11 @@ class CorpusBody(BaseModel):
     kind: str = "own"  # own | inspiration
 
 
+class ImportVoiceBody(BaseModel):
+    url: str
+    kind: str = "own"  # own | inspiration
+
+
 class PostedBody(BaseModel):
     url: Optional[str] = None
 
@@ -245,6 +251,13 @@ def _own_account(account_id: int, user: dict) -> dict:
     if user["id"] and account.get("owner_id") not in (None, user["id"]):
         raise HTTPException(status_code=403, detail="Not your persona")
     return account
+
+
+# Pulse Studio — the internal glass-wall API (api/studio.py). Read-only
+# windows over the pipeline's own tables; same auth, same ownership rules.
+from api.studio import build_router as _build_studio_router  # noqa: E402
+
+app.include_router(_build_studio_router(require_auth, _own_account, _db))
 
 
 @app.get("/api/accounts")
@@ -331,6 +344,60 @@ def regenerate_visual(post_id: int, template: Optional[str] = None,
 
 
 # --------------------------------------------------------------------------- #
+# Routes — visual references (the V2 design agent's library)
+# --------------------------------------------------------------------------- #
+@app.get("/api/accounts/{account_id}/refs")
+def list_refs(account_id: int, kind: Optional[str] = None,
+              user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    return memory.get_visual_refs(account_id, kind=kind, db_path=_db())
+
+
+@app.post("/api/accounts/{account_id}/refs")
+async def add_ref(account_id: int,
+                  file: Optional[UploadFile] = File(None),
+                  url: Optional[str] = Form(None),
+                  notes: str = Form(""),
+                  tags: str = Form(""),
+                  user: dict = Depends(require_auth)):
+    """Add an approved background: an uploaded image OR a URL. Tags/notes are
+    what the library backend matches prompts against — describe the mood."""
+    _own_account(account_id, user)
+    if file is None and not (url or "").strip():
+        raise HTTPException(status_code=422, detail="provide a file or a url")
+    from pipeline import design
+    path = None
+    if file is not None:
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="empty file")
+        ext = Path(file.filename or "bg.png").suffix.lower() or ".png"
+        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+            raise HTTPException(status_code=422, detail="png/jpg/webp only")
+        from datetime import datetime, timezone
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S%f")
+        p = design.refs_dir() / f"ref-{account_id}-{stamp}{ext}"
+        p.write_bytes(data)
+        path = str(p)
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    ref_id = memory.add_visual_ref(account_id, kind="background", path=path,
+                                   url=(url or "").strip() or None,
+                                   notes=notes, tags=tag_list, db_path=_db())
+    return {"ok": True, "id": ref_id}
+
+
+@app.delete("/api/accounts/{account_id}/refs/{ref_id}")
+def delete_ref(account_id: int, ref_id: int,
+               user: dict = Depends(require_auth)):
+    _own_account(account_id, user)
+    mine = {r["id"] for r in memory.get_visual_refs(account_id, db_path=_db())}
+    if ref_id not in mine:
+        raise HTTPException(status_code=404, detail="no such reference")
+    memory.remove_visual_ref(ref_id, db_path=_db())
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
 # Routes — Content Squeezer (repurpose)
 # --------------------------------------------------------------------------- #
 @app.post("/api/repurpose")
@@ -350,6 +417,26 @@ def pack(pack_id: int, user: dict = Depends(require_auth)):
     if posts:
         _own_account(posts[0]["account_id"], user)
     return posts
+
+
+@app.get("/api/accounts/{account_id}/assets")
+def list_assets(account_id: int, user: dict = Depends(require_auth)):
+    """The content library: everything this account ever squeezed."""
+    _own_account(account_id, user)
+    return memory.list_content_assets(account_id, db_path=_db())
+
+
+@app.post("/api/accounts/{account_id}/assets/{asset_id}/squeeze")
+def resqueeze_asset(account_id: int, asset_id: int,
+                    user: dict = Depends(require_auth)):
+    """Re-squeeze a library asset — fresh decomposition, fresh packs, with
+    whatever the voice genome has learned since the asset was filed."""
+    account = _own_account(account_id, user)
+    from pipeline.repurpose import ContentSqueezer
+    out = ContentSqueezer(db_path=_db()).squeeze(account, asset_id=asset_id)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error"))
+    return out
 
 
 @app.get("/api/accounts/{account_id}/style")
@@ -410,6 +497,19 @@ def corpus_add(account_id: int, body: CorpusBody, user: dict = Depends(require_a
     return CorpusManager(db_path=_db()).add(account_id, body.text, kind=body.kind)
 
 
+@app.post("/api/accounts/{account_id}/import-voice")
+def import_voice(account_id: int, body: ImportVoiceBody,
+                 user: dict = Depends(require_auth)):
+    """One-paste onboarding: a blog/Substack/Medium/RSS URL → their writing
+    becomes the corpus, the voice trains itself, the niche fills itself."""
+    _own_account(account_id, user)
+    from style.importer import import_voice as run_import
+    out = run_import(account_id, body.url, kind=body.kind, db_path=_db())
+    if not out.get("ok"):
+        raise HTTPException(status_code=422, detail=out.get("error", "import failed"))
+    return out
+
+
 @app.post("/api/accounts/{account_id}/retrain")
 def corpus_retrain(account_id: int, user: dict = Depends(require_auth)):
     _own_account(account_id, user)
@@ -457,7 +557,21 @@ def list_drafts(status: str = "draft", account_id: Optional[int] = None,
     posts = memory.get_posts(account_id=account_id,
                              status=None if status == "all" else status,
                              db_path=_db())
-    return [p for p in posts if p["account_id"] in mine][:50]
+    posts = [p for p in posts if p["account_id"] in mine][:50]
+    # "why this draft": the signal's verdict + the story behind it, so the
+    # review card explains itself instead of presenting text from nowhere
+    for p in posts:
+        why = {}
+        if p.get("signal_id"):
+            s = memory.get_signal(p["signal_id"], db_path=_db()) or {}
+            why = {k: s.get(k) for k in ("score", "tier", "angle", "topic")}
+        if p.get("article_id"):
+            a = memory.get_article(p["article_id"], db_path=_db()) or {}
+            why["source_name"] = a.get("source_name")
+            why["source_title"] = a.get("title")
+            why["source_url"] = a.get("url")
+        p["why"] = {k: v for k, v in why.items() if v}
+    return posts
 
 
 @app.post("/api/drafts/{post_id}/approve")

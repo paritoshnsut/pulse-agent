@@ -56,8 +56,38 @@ CREATE TABLE IF NOT EXISTS content_packs (
     source_title   TEXT,
     source_url     TEXT,
     source_excerpt TEXT,
-    created_at     TEXT NOT NULL
+    created_at     TEXT NOT NULL,
+    asset_id       INTEGER REFERENCES content_assets(id),
+    idea           TEXT          -- the core idea this pack expands (squeezer v2)
 );
+
+-- The content library: every source the user ever squeezed, kept whole.
+-- Assets are durable raw material — re-squeezable months later with a better
+-- voice genome, mineable for evergreen content. This is asset-driven content
+-- (vs the watchers' event-driven content).
+CREATE TABLE IF NOT EXISTS content_assets (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES accounts(id),
+    title        TEXT,
+    source_type  TEXT NOT NULL,      -- paste | url | youtube
+    source_url   TEXT,
+    raw_content  TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
+-- The content graph: each asset decomposed into typed, reusable nodes.
+-- One idea node can later become a tweet, a thread, a LinkedIn post and a
+-- newsletter — generation works from nodes, never from the undigested blob.
+CREATE TABLE IF NOT EXISTS content_insights (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id     INTEGER NOT NULL REFERENCES content_assets(id),
+    account_id   INTEGER NOT NULL REFERENCES accounts(id),
+    kind         TEXT NOT NULL,      -- idea | claim | story | statistic | quote | opinion
+    text         TEXT NOT NULL,
+    angles_json  TEXT,               -- suggested angles, ideas only
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_insights_asset ON content_insights(asset_id);
 
 -- Raw ingested content from every source. UNIQUE(url) is the dedup key:
 -- re-ingesting the same article is a no-op, so the same story is never
@@ -97,6 +127,8 @@ CREATE TABLE IF NOT EXISTS signals (
     memory_leverage    REAL,                -- this account's receipts on the topic
     window_urgency     REAL,
     historical_perf    REAL,
+    brand_safety       REAL,                -- 0-10: can a brand post about this without looking tone-deaf
+    sensitivity        TEXT,                -- safe | sensitive | tragedy | divisive | controversy
     angle              TEXT,                -- suggested take/angle for a post
     topic              TEXT,                -- kebab-case topic slug for memory filing
     format             TEXT,                -- post format the scorer judged best-fit
@@ -297,3 +329,21 @@ CREATE TABLE IF NOT EXISTS predictions_tracker (
                                             -- fetched before this were already considered
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_status ON predictions_tracker(status);
+
+-- Visual references (VISUALS.md Phase V2): the inspiration/asset library for
+-- the design agent. kind='background' are user-approved backgrounds/textures
+-- (the keyless path), kind='reference' are admired posts/looks (steer prompts,
+-- never used directly), kind='generated' are AI-generated backgrounds kept for
+-- reuse — their created_at also drives the per-day generation cap.
+CREATE TABLE IF NOT EXISTS visual_refs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    kind        TEXT NOT NULL DEFAULT 'background',  -- background | reference | generated
+    path        TEXT,                        -- local file under visuals_dir/refs
+    url         TEXT,                        -- or a remote image url
+    notes       TEXT,                        -- how/when to use ("dark gym texture")
+    tags        TEXT,                        -- JSON list, e.g. ["launch","texture"]
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_visual_refs_acct ON visual_refs(account_id, kind, active);
