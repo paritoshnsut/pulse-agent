@@ -69,6 +69,18 @@ brain; visuals are the multiplier.
 | **Font architecture note:** fontsource browser subsets DON'T work with Satori (no same-family multi-file fallback → ₹ tofu). Fixed: `merge_fonts.py` builds single merged ttf per family/weight (committed in `render/fonts/`), and every stack ends in Noto Sans for cross-family glyph fallback. | ✅ |
 | More templates: announcement card, list/tips card, before-after | ⏳ |
 
+## Phase V1.75 — visual prowess (SHIPPED)
+
+The four gaps called out in the honest assessment ("text-first cards, no
+charts, three fonts, gradient fallback"), closed in one build:
+
+| Item | Status |
+|---|---|
+| **chart_card — real data visualization.** Bar + line charts drawn deterministically (`render/charts.mjs`): bars are flexbox, lines are one SVG path with absolutely-positioned value labels (Satori can't render svg `<text>`). Latest point pops in accent. `pipeline/charts.py` extracts the spec — free numeric gate (≥3 distinct numbers) → ONE bounded Claude call ("extract, never invent") → validated + CACHED in post meta, so re-renders/template swaps never pay twice. Misses cache too; transient failures don't (retry next render). Negative values force `line` (bars can't show negatives honestly). data_story auto-tries the chart; explicit `template=chart_card` works on any post; no series → graceful fall-through to the normal card. | ✅ |
+| **Illustration layer.** `render/icons.mjs`: ~24 bundled stroke icons (lucide-style path data, no deps, no fetches) + geometric motifs (dot grid / accent ring / light beam, seed-picked so a feed doesn't repeat one motif). `pick_icon()` maps content keywords → icon (markets→trending_up, parliament→landmark, court→scale, IPL→trophy…), format as fallback. Rendered at low opacity UNDER the text column — decoration never reflows text. `VISUALS_DECOR=none\|subtle\|bold` (default subtle). chart_card keeps decor off — nothing competes with the data. | ✅ |
+| **Procedural hero backgrounds.** `render/art.mjs`: seeded compositions in the brand palette — orbs / mesh corners / diagonal beams / horizon glow. Deterministic (same seed+accent = same art, so regenerate doesn't reshuffle an approved card). Hero with no image now gets art, never a flat gradient — every account looks designed from day 1, keyless and free. Photos keep the strong scrim; art gets a soft one (it's already dark). | ✅ |
+| **Custom brand fonts.** `POST /api/accounts/{id}/font` (TTF/OTF, weight 400/700, magic-bytes validated) → saved by convention as `render/fonts/custom/acct{id}-{weight}.ttf` (gitignored), kit `font_family='custom'` — no schema change. Server loads custom fonts lazily per render, cached by mtime (re-upload applies without restart). Missing file → stack falls back to bundled fonts + Noto Sans, never tofu. DELETE endpoint reverts to `sans`. | ✅ |
+
 ## Phase V2 — the AI-imagery design agent (V2a SHIPPED)
 
 The user-insight this encodes: human designers already work as

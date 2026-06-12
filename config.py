@@ -250,6 +250,9 @@ class Settings:
     visuals_port: int = int(os.getenv("VISUALS_PORT", "8787"))
     visuals_dir: str = os.getenv("VISUALS_DIR", str(PROJECT_ROOT / "visuals"))
     render_dir: str = os.getenv("RENDER_DIR", str(PROJECT_ROOT / "render"))
+    # Decoration layer on cards (topic icon + geometric motif at low opacity):
+    # none | subtle | bold. Subtle keeps cards editorial, not busy.
+    visuals_decor: str = os.getenv("VISUALS_DECOR", "subtle").lower()
     # Carousel: max CONTENT slides (cover + CTA come on top); short inputs
     # fall back to a single card rather than a thin two-slide carousel.
     carousel_max_slides: int = int(os.getenv("CAROUSEL_MAX_SLIDES", "6"))

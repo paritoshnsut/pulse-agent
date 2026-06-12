@@ -398,6 +398,55 @@ def delete_ref(account_id: int, ref_id: int,
 
 
 # --------------------------------------------------------------------------- #
+# Routes — custom brand fonts (VISUALS.md: beyond the three bundled families)
+# --------------------------------------------------------------------------- #
+@app.post("/api/accounts/{account_id}/font")
+async def upload_font(account_id: int,
+                      file: UploadFile = File(...),
+                      weight: int = Form(400),
+                      user: dict = Depends(require_auth)):
+    """Upload a brand TTF (regular=400 and/or bold=700). Saved by convention
+    as render/fonts/custom/acct{id}-{weight}.ttf; the render service loads it
+    per render, so it takes effect immediately. Sets font_family='custom'."""
+    _own_account(account_id, user)
+    if weight not in (400, 700):
+        raise HTTPException(status_code=422, detail="weight must be 400 or 700")
+    ext = Path(file.filename or "font.ttf").suffix.lower()
+    if ext not in (".ttf", ".otf"):
+        raise HTTPException(status_code=422, detail="ttf/otf only")
+    data = await file.read()
+    # every TrueType/OpenType file starts with one of these magics
+    if len(data) < 12 or data[:4] not in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+        raise HTTPException(status_code=422, detail="not a valid font file")
+    from pipeline.visuals import custom_font_dir
+    d = custom_font_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"acct{account_id}-{weight}.ttf").write_bytes(data)
+    kit = memory.get_brand_kit(account_id, db_path=_db()) or {}
+    kit["font_family"] = "custom"
+    memory.save_brand_kit(account_id, kit, db_path=_db())
+    return {"ok": True, "family": f"Custom-acct{account_id}", "weight": weight}
+
+
+@app.delete("/api/accounts/{account_id}/font")
+def delete_font(account_id: int, user: dict = Depends(require_auth)):
+    """Remove uploaded brand fonts and fall back to the bundled stack."""
+    _own_account(account_id, user)
+    from pipeline.visuals import custom_font_dir
+    removed = 0
+    for w in (400, 700):
+        p = custom_font_dir() / f"acct{account_id}-{w}.ttf"
+        if p.exists():
+            p.unlink()
+            removed += 1
+    kit = memory.get_brand_kit(account_id, db_path=_db())
+    if kit and kit.get("font_family") == "custom":
+        kit["font_family"] = "sans"
+        memory.save_brand_kit(account_id, kit, db_path=_db())
+    return {"ok": True, "removed": removed}
+
+
+# --------------------------------------------------------------------------- #
 # Routes — Content Squeezer (repurpose)
 # --------------------------------------------------------------------------- #
 @app.post("/api/repurpose")

@@ -53,27 +53,70 @@ def _strip_hashtags(text: str) -> str:
     return text
 
 
+# ---- topic icons (the illustration layer; names match render/icons.mjs).
+# First keyword match wins; format default as the fallback. Deterministic and
+# free — the icon is decoration, not meaning, so a near-miss is harmless.
+_ICON_KEYWORDS = (
+    ("trending_down", ("crash", "fall", "drop", "decline", "slump", "loss")),
+    ("trending_up", ("market", "stock", "sensex", "nifty", "growth", "rally",
+                     "gdp", "economy", "inflation", "rbi", "fed", "rate")),
+    ("landmark", ("parliament", "government", "minister", "election", "policy",
+                  "congress", "bjp", "bill", "court order", "cabinet")),
+    ("scale", ("court", "justice", "verdict", "legal", "lawsuit", "judge")),
+    ("coins", ("crore", "funding", "revenue", "profit", "budget", "tax",
+               "investment", "ipo")),
+    ("trophy", ("match", "cricket", "ipl", "tournament", "champion", "medal",
+                "world cup")),
+    ("film", ("movie", "film", "box office", "trailer", "bollywood")),
+    ("cpu", ("ai ", " ai", "tech", "software", "startup", "chip", "data")),
+    ("leaf", ("climate", "environment", "carbon", "renewable", "monsoon")),
+    ("heart", ("health", "hospital", "vaccine", "disease")),
+    ("shield", ("defence", "defense", "security", "military", "border")),
+    ("megaphone", ("campaign", "brand", "marketing", "launch", "advertis")),
+    ("users", ("community", "workers", "employment", "jobs", "population")),
+    ("globe", ("global", "world", "international", "export", "trade")),
+)
+_FORMAT_ICONS = {
+    "data_story": "bar_chart", "prediction": "target", "explainer": "book",
+    "hot_take": "zap", "callback": "check", "thread": "message_square",
+    "counter_narrative": "scale", "evergreen": "book", "achievement": "trophy",
+}
+
+
+def pick_icon(post: dict) -> Optional[str]:
+    """Icon name for the decor layer: content keywords first, format default
+    second, None when nothing fits (the card just skips the glyph)."""
+    text = (post.get("content") or "").lower()
+    for icon, words in _ICON_KEYWORDS:
+        if any(w in text for w in words):
+            return icon
+    return _FORMAT_ICONS.get(post.get("format") or "")
+
+
 def choose_template(post: dict) -> tuple[str, dict]:
     """(template, data) for a post. quote-ish content gets the quote card,
     a post built on a number gets the stat card, everything else the insight
-    card. Threads/long forms use their first line as the hook."""
+    card. Threads/long forms use their first line as the hook. Every card
+    carries icon + seed for the decoration layer."""
     meta = post.get("meta_json") or {}
     tweets = meta.get("tweets") or []
     text = _strip_hashtags(tweets[0] if tweets else post["content"])
+    decor = {"icon": pick_icon(post), "seed": post.get("id") or 0}
 
     fmt = post.get("format") or ""
     if fmt == "quote_context":
-        return "quote_card", {"text": text}
+        return "quote_card", {"text": text, **decor}
     stat = extract_stat(text)
     if fmt == "data_story" or (stat and fmt in ("hot_take", "prediction", "callback")):
         if stat:
             context = text.replace(stat, "").strip(" .—–:,-")
-            return "stat_highlight", {"stat": stat, "context": context or text}
+            return "stat_highlight", {"stat": stat, "context": context or text,
+                                      **decor}
     title = {"explainer": "Explained", "prediction": "Prediction",
              "callback": "Called it", "counter_narrative": "The other side",
              "evergreen": "Standing take", "linkedin_post": "",
              "newsletter": ""}.get(fmt, "")
-    return "insight_card", {"title": title, "text": text}
+    return "insight_card", {"title": title, "text": text, **decor}
 
 
 _LOGO_CACHE: dict = {}
@@ -112,12 +155,32 @@ def logo_asset(logo_url: Optional[str], height: int = 40) -> Optional[dict]:
     return asset
 
 
+def custom_font_dir() -> Path:
+    return Path(settings.render_dir) / "fonts" / "custom"
+
+
+def custom_font_key(account_id: Optional[int],
+                    font_family: Optional[str]) -> Optional[str]:
+    """The render service loads fonts/custom/acct{id}-{weight}.ttf when the
+    kit says font_family='custom'. Missing file -> None, so the templates
+    fall back to the bundled stack instead of rendering tofu."""
+    if font_family != "custom" or not account_id:
+        return None
+    key = f"acct{account_id}"
+    if any((custom_font_dir() / f"{key}-{w}.ttf").exists() for w in (400, 700)):
+        return key
+    return None
+
+
 def brand_payload(account: dict, kit: Optional[dict]) -> dict:
+    font_family = (kit or {}).get("font_family")
     return {
         "accent_color": (kit or {}).get("accent_color"),
         "secondary_color": (kit or {}).get("secondary_color"),
         "bg_style": (kit or {}).get("bg_style"),
-        "font_family": (kit or {}).get("font_family"),
+        "font_family": font_family,
+        "custom_font_key": custom_font_key(account.get("id"), font_family),
+        "decor_style": settings.visuals_decor,
         "watermark_text": (kit or {}).get("watermark_text")
                           or (settings.ai_label or "").strip(),
         "handle": account.get("handle") or "",
@@ -267,7 +330,7 @@ class PillowRenderer:
     def render(self, template: str, data: dict, brand: dict) -> Optional[bytes]:
         try:
             from image.cards import render_card
-            text = data.get("text") or " ".join(
+            text = data.get("text") or data.get("title") or " ".join(
                 filter(None, [data.get("stat"), data.get("context")]))
             path = render_card(text, handle=brand.get("handle", ""))
             return Path(path).read_bytes()
@@ -345,6 +408,33 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         if hero:
             return hero
         template = None
+
+    # data visualization: an explicit chart_card request, or a data_story on
+    # auto-pick, tries the chart spec (cached on the post; one Claude call
+    # max, behind the free numeric gate). No series -> normal card path.
+    if template == "chart_card" or (template is None
+                                    and post.get("format") == "data_story"):
+        try:
+            from pipeline.charts import ChartExtractor
+            spec = ChartExtractor().spec_for(post, db_path=db_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Chart path failed for #%d: %s", post_id, exc)
+            spec = None
+        if spec:
+            brand = brand_payload(account, kit)
+            data = {**spec, "seed": post.get("id") or 0}
+            png = r.render("chart_card", data, brand)
+            if png is None:
+                png = PillowRenderer().render("chart_card", data, brand)
+            if png is not None:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                path = _save(png, f"post{post_id}-{stamp}.png")
+                memory.update_post_meta(post_id, {"visual": path.name},
+                                        db_path=db_path)
+                logger.info("Visual for #%d: %s via chart_card", post_id, path.name)
+                return str(path)
+        if template == "chart_card":
+            template = None       # explicit ask but no series: auto-pick card
 
     if template is None and (post.get("format") or "") in CAROUSEL_FORMATS:
         cover = generate_carousel(post, account, kit, r, db_path=db_path)

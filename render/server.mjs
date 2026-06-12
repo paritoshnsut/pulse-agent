@@ -8,7 +8,7 @@
 // and health-checks it (pipeline/visuals.py).
 
 import http from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import satori from "satori";
@@ -40,13 +40,37 @@ const FONTS = [
   font("NotoSans-700.ttf", "Noto Sans", 700),
 ];
 
+// Custom brand fonts: uploaded via the API as fonts/custom/<key>-{400,700}.ttf
+// and referenced by brand.custom_font_key. Loaded lazily per render, cached by
+// mtime so a re-upload takes effect without a restart. Missing files are
+// simply skipped — templates' stacks end in Noto Sans, so text still renders.
+const _customCache = new Map();   // path -> {mtime, font}
+
+function customFonts(key) {
+  if (!key || !/^[\w.-]+$/.test(key)) return [];
+  const out = [];
+  for (const weight of [400, 700]) {
+    const path = join(HERE, "fonts", "custom", `${key}-${weight}.ttf`);
+    try {
+      const mtime = statSync(path).mtimeMs;
+      const hit = _customCache.get(path);
+      if (hit && hit.mtime === mtime) { out.push(hit.font); continue; }
+      const f = { name: `Custom-${key}`, data: readFileSync(path),
+                  weight, style: "normal" };
+      _customCache.set(path, { mtime, font: f });
+      out.push(f);
+    } catch { /* no file for this weight — fine */ }
+  }
+  return out;
+}
+
 async function renderPNG(template, data, brand) {
   const build = TEMPLATES[template];
   if (!build) throw new Error(`unknown template '${template}'`);
   const size = TEMPLATE_SIZES[template] || SIZE;  // carousels are square
   const svg = await satori(build(data || {}, brand || {}), {
     ...size,
-    fonts: FONTS,
+    fonts: [...customFonts((brand || {}).custom_font_key), ...FONTS],
   });
   const png = new Resvg(svg, {
     fitTo: { mode: "width", value: size.width },

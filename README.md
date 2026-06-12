@@ -380,7 +380,8 @@ Per-account visual identity: colors, fonts, logo, tagline, tone modifiers. Used 
 | `timing.py` | Optimal post timing engine |
 | `feedback.py` | Engagement feedback utilities |
 | `updater.py` | Style DNA updater |
-| `visuals.py` | Visual card generation (Satori/Pillow) |
+| `visuals.py` | Visual card generation (Satori/Pillow): templates, carousels, charts, decor |
+| `charts.py` | Chart-spec extraction (one cached Claude call) for chart_card |
 | `design.py` | AI design agent |
 | `evergreen.py` | Evergreen / opinion post generator |
 
@@ -418,7 +419,8 @@ Per-account visual identity: colors, fonts, logo, tagline, tone modifiers. Used 
 | `sources.py` | Feed catalog: 117+ RSS feeds organized by vertical + region |
 | `moments.py` | 89 calendar moments with dates and planning windows |
 | `presets.py` | Content format presets |
-| `image/cards.py` | Pillow image card generator |
+| `image/cards.py` | Pillow image card generator (fail-safe fallback) |
+| `render/` | Satori render service: `templates.mjs` (8 layouts), `charts.mjs` (bar/line), `icons.mjs` (24 topic icons + decor), `art.mjs` (procedural backgrounds), `server.mjs` (Node service + custom font loading) |
 | `api/studio.py` | Pulse Studio web UI backend |
 
 ---
@@ -621,7 +623,7 @@ pytest -x                 # stop at first failure
 pytest tests/test_decision.py   # one module
 ```
 
-**435 tests** across 30 test files. All tests are deterministic — Claude API calls are stubbed via `conftest.StubClient`. Tests hit a real in-memory SQLite DB (via the `temp_db` fixture) for integration-level confidence.
+**454 tests** across 31 test files. All tests are deterministic — Claude API calls are stubbed via `conftest.StubClient`. Tests hit a real in-memory SQLite DB (via the `temp_db` fixture) for integration-level confidence.
 
 Key test files:
 - `test_decision.py` — scoring math, keyword pre-filter, story dedup gate
