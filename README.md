@@ -1,6 +1,8 @@
 # Pulse Agent — Engineering Guide
 
-The autonomous AI content agent for political and news accounts. It watches the internet 24/7, scores what matters, drafts posts in your voice, and sends them to your phone for one-tap approval. It never posts to X automatically — you own the publish step.
+The autonomous AI content agent for any brand, creator, or commentator. It watches the internet 24/7, scores what matters for your specific niche, drafts posts in your voice, and sends them to your phone for one-tap approval. It never posts to X automatically — you own the publish step.
+
+Started as a political/news commentator tool; now domain-agnostic. The same engine runs a political commentator reacting to breaking news, a finance brand amplifying market data, a sports creator riding viral moments, or a startup building thought leadership. The wedge is the same: an autonomous agent that watches your world, learns your voice and brand, and never lets you face a blank page.
 
 ---
 
@@ -32,7 +34,12 @@ The autonomous AI content agent for political and news accounts. It watches the 
 
 **One persona loop (the typical case):** The agent ingests ~8,000+ articles/day from 117+ RSS feeds, YouTube channels, Reddit, Google Trends, Wikipedia, and Google News. It filters this down to ~200 articles that are both relevant to your niche and genuinely new stories. It scores each one via Claude, identifies the top FIRE/WARM signals, and drafts platform-native posts in your voice. The drafts arrive on your Telegram within minutes of the event. You tap `/approve` — the post is formatted and you copy it to X.
 
-**Multi-persona:** Every account has its own verticals, topics, and style DNA. The scoring and drafting loop runs independently per persona. Ingestion is shared (one RSS fetch feeds all accounts).
+**Multi-persona:** Every account has its own verticals, topics, style DNA, and brand kit. The scoring and drafting loop runs independently per persona. Ingestion is shared (one RSS fetch feeds all accounts). A politics commentator and a finance brand can run in the same instance — they never see each other's signals.
+
+**Account kinds supported:**
+- `commentator` — reacts to news made by others (political analyst, finance commentator, sports writer)
+- `creator` — builds original takes and thought leadership (startup founder, industry expert)
+- `brand` — amplifies wins, manages brand-safe positioning, auto-suppresses sensitive topics
 
 ---
 
@@ -80,7 +87,7 @@ Daily briefing digest (COOL ideas, outbox nag, timing advice)
 ## Input sources
 
 ### RSS / NewsAPI (117 feeds, 15 min interval)
-Organized into verticals: `politics`, `finance`, `sports`, `entertainment`, `technology`, `marketing`. Each vertical has India + US feeds plus global outlets. The full catalog is in `sources.py`. Active accounts' verticals determine which verticals are actually fetched — a politics-only setup never pulls marketing feeds.
+Organized into verticals: `politics`, `finance`, `sports`, `entertainment`, `technology`, `marketing`. Each vertical has India + US feeds plus global outlets. The full catalog is in `sources.py`. Active accounts' verticals determine which verticals are actually fetched — a finance brand never pulls sports feeds, a politics commentator never pulls marketing feeds.
 
 Custom per-account feeds are set via `watch_list` rows with `kind=rss_feed` or `kind=news_query` (NewsAPI keyword queries). These ride along with the global feed pull.
 
