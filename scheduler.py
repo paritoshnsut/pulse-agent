@@ -61,6 +61,7 @@ from style.crowd import CrowdWisdomScraper
 from style.voice import effective_for
 from style.learning import ReviewLearner
 from style.scorer import PersonaConsistencyScorer
+from watch.gnews import GoogleNewsWatcher
 from watch.reddit import RedditWatcher
 from watch.trends import TrendsWatcher, WikipediaWatcher
 from watch.twitter import TwitterWatcher
@@ -130,6 +131,12 @@ def job_trends():
 
 def job_wikipedia():
     WikipediaWatcher().run()
+
+
+def job_gnews():
+    """Google News RSS per-account topic queries — keyless, ~10 articles/query,
+    covers 500+ outlets. Complements manual RSS feeds with breadth."""
+    GoogleNewsWatcher(max_queries=settings.gnews_max_queries).run()
 
 
 def job_discover():
@@ -313,6 +320,7 @@ JOBS = [
     ("reddit", job_reddit, settings.poll_reddit_min),
     ("trends", job_trends, settings.poll_trends_min),
     ("wikipedia", job_wikipedia, settings.poll_wikipedia_min),
+    ("gnews", job_gnews, settings.poll_gnews_min),
     ("process", job_process, settings.poll_process_min),
     ("callbacks", job_callbacks, settings.poll_callbacks_min),
     ("counter", job_counter, settings.poll_counter_min),

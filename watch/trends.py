@@ -35,6 +35,7 @@ logger = logging.getLogger("watch.trends")
 
 TRENDS_RSS = "https://trends.google.com/trending/rss?geo={geo}"
 WIKI_API = "https://{lang}.wikipedia.org/w/api.php"
+WIKI_SUMMARY = "https://{lang}.wikipedia.org/api/rest_v1/page/summary/{title}"
 USER_AGENT = "pulse-agent/0.1 (single-user content agent)"
 
 DEFAULT_GEOS = [("IN", "india"), ("US", "us")]
@@ -128,6 +129,33 @@ class TrendsWatcher:
         return {"new": new, "duplicate": dup, "total": len(articles)}
 
 
+def _fetch_wiki_summary(title: str, lang: str = "en", timeout: int = 8) -> Optional[str]:
+    """Wikipedia REST API — free, keyless, no rate limit for reasonable use.
+    Returns the lead-paragraph extract (up to 1500 chars) or None on failure.
+    Called once per detected edit storm so the article gets real content, not
+    just 'edit storm detected' — the decision scorer can then read the summary
+    and judge relevance + reaction potential properly."""
+    try:
+        slug = title.replace(" ", "_")
+        resp = requests.get(
+            WIKI_SUMMARY.format(lang=lang, title=slug),
+            headers={"User-Agent": USER_AGENT},
+            timeout=timeout,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        extract = (data.get("extract") or "").strip()
+        if not extract:
+            return None
+        # Truncate to prompt-safe length — this becomes the article's content field.
+        return extract[:1500] + ("…" if len(extract) > 1500 else "")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Wikipedia summary failed for '%s': %s", title, exc)
+        return None
+
+
 class WikipediaWatcher:
     """Detects edit storms: pages edited unusually often in a short window."""
 
@@ -164,6 +192,9 @@ class WikipediaWatcher:
         out: list[dict] = []
         for title, n in storms:
             slug = title.replace(" ", "_")
+            # Fetch the article's lead paragraph so the scorer can read the actual
+            # content — "edit storm detected" alone doesn't tell it what happened.
+            summary = _fetch_wiki_summary(title, lang=self.lang)
             out.append({
                 "source": "wikipedia",
                 "source_name": "Wikipedia edit storm",
@@ -173,7 +204,7 @@ class WikipediaWatcher:
                 "title": f"Edit storm: {title} ({n} edits/hr)",
                 "description": f"{title} saw {n} edits in the last {self.window_minutes} min — "
                                "often an early signal of a breaking event.",
-                "content": None,
+                "content": summary,   # None on cold start or 404; scorer handles gracefully
                 "author": None,
                 "published_at": datetime.now(timezone.utc).isoformat(),
                 "velocity_hint": round(min(10.0, n / max_n * 10.0), 2),

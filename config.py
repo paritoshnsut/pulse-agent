@@ -123,6 +123,11 @@ class Settings:
     poll_discover_min: int = int(os.getenv("POLL_DISCOVER_MIN", "45"))
     discover_max_queries: int = int(os.getenv("DISCOVER_MAX_QUERIES", "6"))
 
+    # Google News RSS per-account topic queries (keyless official endpoint).
+    # Same topic → one fetch across all accounts (rule #8 applies here too).
+    poll_gnews_min: int = int(os.getenv("POLL_GNEWS_MIN", "30"))
+    gnews_max_queries: int = int(os.getenv("GNEWS_MAX_QUERIES", "8"))
+
     # Skip scoring anything older than this at ingest time (don't pay Claude to
     # judge stale news, esp. on first run). 0 disables the cutoff.
     stale_after_min: int = int(os.getenv("STALE_AFTER_MIN", "180"))

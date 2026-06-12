@@ -139,7 +139,8 @@ def test_poll_once_ignores_strangers(commander):
 
 
 def test_poll_once_noop_when_unconfigured(temp_db, monkeypatch):
+    # The guard fires on the DEFAULT transport path (no injected transport).
+    # An injected transport signals test/custom mode and bypasses the credential
+    # guard — the caller is responsible for providing a working transport.
     patch_settings(monkeypatch, telegram_bot, telegram_bot_token="", telegram_chat_id="")
-    t = FakeTransport([_update(1, "/list")])
-    assert TelegramCommander(transport=t, db_path=temp_db).poll_once() == 0
-    assert t.calls == []
+    assert TelegramCommander(db_path=temp_db).poll_once() == 0

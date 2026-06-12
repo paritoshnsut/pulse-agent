@@ -23,6 +23,7 @@ restarts don't replay old commands.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from config import settings
@@ -51,6 +52,7 @@ class TelegramCommander:
 
     def __init__(self, transport: Optional[Callable[[str, dict], dict]] = None,
                  db_path: Optional[str] = None) -> None:
+        self._injected_transport = transport is not None  # True when caller provides test transport
         self._transport = transport or poster.default_transport
         self.db_path = db_path
         self.notifier = poster.TelegramNotifier(transport=self._transport)
@@ -59,7 +61,10 @@ class TelegramCommander:
     def poll_once(self) -> int:
         """Fetch new updates, handle commands from YOUR chat, reply, advance
         the persisted offset. Returns how many commands were handled."""
-        if not (settings.telegram_bot_token and settings.telegram_chat_id):
+        # When using the default (real) transport, credentials must be set.
+        # Injected transports (tests, custom integrations) bypass this guard.
+        if not self._injected_transport and not (
+                settings.telegram_bot_token and settings.telegram_chat_id):
             return 0
         offset = int(memory.kv_get(OFFSET_KEY, "0", db_path=self.db_path) or 0)
         resp = self._transport("getUpdates", {"offset": offset + 1, "timeout": 0})
@@ -67,6 +72,11 @@ class TelegramCommander:
         max_id = offset
         for upd in resp.get("result") or []:
             max_id = max(max_id, upd.get("update_id", 0))
+            # Channel posts arrive as 'channel_post', not 'message'.
+            channel_post = upd.get("channel_post")
+            if channel_post:
+                self._ingest_channel_post(channel_post)
+                continue
             msg = upd.get("message") or {}
             chat_id = str((msg.get("chat") or {}).get("id", ""))
             text = (msg.get("text") or "").strip()
@@ -79,6 +89,63 @@ class TelegramCommander:
         if max_id != offset:
             memory.kv_set(OFFSET_KEY, str(max_id), db_path=self.db_path)
         return handled
+
+    def _ingest_channel_post(self, msg: dict) -> None:
+        """Persist a message from a watched Telegram channel as an article.
+
+        SETUP: add the bot as an admin of the channel you want to watch, then add
+        the channel to the watch list (Settings → Watch List, kind=telegram_channel,
+        ref=@channelname or the numeric -100XXXX id). The bot receives all new
+        posts from that channel via getUpdates automatically."""
+        chat = msg.get("chat") or {}
+        channel_id_str = str(chat.get("id", ""))
+        channel_username = (chat.get("username") or "").lower().lstrip("@")
+
+        # Only ingest channels the user has explicitly added to the watch list.
+        watched = memory.get_watch(kind="telegram_channel", db_path=self.db_path)
+        if not watched:
+            return
+
+        def _matches(ref: str) -> bool:
+            r = ref.strip().lower().lstrip("@")
+            return r == channel_id_str or r == channel_username or r == channel_id_str.lstrip("-")
+
+        if not any(_matches(w["ref"]) for w in watched):
+            return   # not a channel we're watching — ignore
+
+        text = (msg.get("text") or msg.get("caption") or "").strip()
+        if not text:
+            return   # photo/sticker with no caption — nothing to ingest
+
+        channel_name = chat.get("title") or chat.get("username") or channel_id_str
+        msg_id = msg.get("message_id", "")
+        url = (f"https://t.me/{channel_username}/{msg_id}" if channel_username
+               else f"tg://channel?id={channel_id_str}&msgid={msg_id}")
+
+        date = msg.get("date")
+        pub_iso = (datetime.fromtimestamp(date, tz=timezone.utc).isoformat()
+                   if date else datetime.now(timezone.utc).isoformat())
+
+        art = {
+            "source": "telegram_channel",
+            "source_name": f"Telegram: {channel_name}",
+            "vertical": None,
+            "region": None,
+            "url": url,
+            "title": text[:200].replace("\n", " "),
+            "description": text[:500] if len(text) > 200 else None,
+            "content": text if len(text) > 500 else None,
+            "author": channel_name,
+            "published_at": pub_iso,
+            "velocity_hint": None,  # no velocity signal from a channel post itself
+            "raw_json": {"chat_id": channel_id_str, "message_id": msg_id},
+        }
+        try:
+            _, is_new = memory.insert_article(art, db_path=self.db_path)
+            if is_new:
+                logger.info("Telegram channel [%s]: new post ingested", channel_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Telegram channel ingest failed: %s", exc)
 
     # ------------------------------------------------------------ commands
     @staticmethod

@@ -26,6 +26,19 @@ SOURCES: dict[str, dict[str, list[tuple[str, str]]]] = {
             ("Times of India — India", "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms"),
             ("Times of India — Top Stories", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
             ("Scroll.in", "https://scroll.in/feeds/all.rss"),
+            # Wire services — primary sources for Indian political news
+            ("ANI News", "https://aninews.in/feed/"),
+            ("The Wire", "https://thewire.in/feed/"),
+            ("The Print", "https://theprint.in/feed/"),
+            ("Newslaundry", "https://www.newslaundry.com/feed"),
+            ("The Quint", "https://www.thequint.com/tech/rss"),
+            # Government primary sources
+            ("PIB — All Releases", "https://pib.gov.in/allReleaseMain.aspx?ModId=6&Lang=1&Regid=3"),
+            ("PIB — PMO", "https://pib.gov.in/rss/ministryrss.aspx?ministry=2"),
+            ("PIB — Finance Ministry", "https://pib.gov.in/rss/ministryrss.aspx?ministry=7"),
+            # Fact-check outlets (critical for political commentary)
+            ("Alt News", "https://www.altnews.in/feed/"),
+            ("Boom Live", "https://www.boomlive.in/feed"),
         ],
         "us": [
             ("Politico — Politics", "https://rss.politico.com/politics-news.xml"),
@@ -228,9 +241,13 @@ REGIONS = ("india", "us", "global")
 # being unrecognized — the same honesty rule as everywhere else).
 # --------------------------------------------------------------------------- #
 SOURCE_KIND_WEIGHTS: dict[str, float] = {
-    "reddit": 0.9,        # a thread is a lead, not a report
-    "trends": 0.9,        # a query spike, not a story
-    "wikipedia": 0.9,     # edit storm = something happened, details unverified
+    "reddit": 0.9,            # a thread is a lead, not a report
+    "reddit_search": 0.9,
+    "trends": 0.9,            # a query spike, not a story
+    "wikipedia": 0.9,         # edit storm = something happened, details unverified
+    "yt_search": 0.95,        # discovered video — not a verified outlet
+    "gnews": 1.0,             # Google-curated from real outlets (source_name carries the outlet)
+    "telegram_channel": 1.0,  # primary source: politician/party speaking directly
 }
 
 DOMAIN_WEIGHTS: dict[str, float] = {
