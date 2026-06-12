@@ -43,15 +43,15 @@ import requests
 from config import settings
 from pipeline import memory
 from watch.reddit import parse_listing
+from watch.reddit_auth import RedditAuth, default_auth
 from watch.youtube import fetch_transcript
 
 logger = logging.getLogger("watch.discover")
 
 YT_SEARCH = "https://www.youtube.com/results"
-REDDIT_SEARCH = "https://www.reddit.com/search.json"
+REDDIT_SEARCH_PATH = "/search.json"
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-REDDIT_UA = "python:pulse-agent:0.1 (single-user content agent)"
 
 _YT_DATA = re.compile(r"var ytInitialData\s*=\s*(\{.*?\});\s*</script>", re.DOTALL)
 _REL_TIME = re.compile(r"(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago")
@@ -199,14 +199,16 @@ def youtube_search(query: str, timeout: int = 15) -> list[dict]:
 
 
 # -------------------------------------------------------------- reddit search
-def reddit_search(query: str, timeout: int = 15, limit: int = 20) -> list[dict]:
+def reddit_search(query: str, timeout: int = 15, limit: int = 20,
+                  auth: Optional[RedditAuth] = None) -> list[dict]:
     """Site-wide Reddit search (hot, last day). Same shape as a subreddit
     listing, so velocity comes free from parse_listing."""
+    _auth = auth or default_auth()
     try:
         resp = requests.get(
-            REDDIT_SEARCH,
+            f"{_auth.base_url}{REDDIT_SEARCH_PATH}",
             params={"q": query, "sort": "hot", "t": "day", "limit": limit},
-            headers={"User-Agent": REDDIT_UA}, timeout=timeout)
+            headers=_auth.headers(), timeout=timeout)
         resp.raise_for_status()
         articles = parse_listing(resp.json())
         for art in articles:

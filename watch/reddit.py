@@ -24,12 +24,11 @@ from typing import Optional
 import requests
 
 from pipeline import memory
+from watch.reddit_auth import RedditAuth, default_auth
 
 logger = logging.getLogger("watch.reddit")
 
-HOT_JSON = "https://www.reddit.com/r/{sub}/hot.json"
-# Reddit requires a unique, descriptive UA or it returns 429.
-USER_AGENT = "python:pulse-agent:0.1 (single-user content agent)"
+HOT_JSON = "{base}/r/{sub}/hot.json"   # base filled from auth (oauth or www)
 
 
 def velocity_from_upvotes(score: int, age_hours: float) -> float:
@@ -86,19 +85,21 @@ def parse_listing(payload: dict, vertical=None, region=None, now=None) -> list[d
 
 
 class RedditWatcher:
-    def __init__(self, db_path: Optional[str] = None, timeout: int = 15, limit: int = 25):
+    def __init__(self, db_path: Optional[str] = None, timeout: int = 15,
+                 limit: int = 25, auth: Optional[RedditAuth] = None):
         self.db_path = db_path
         self.timeout = timeout
         self.limit = limit
+        self._auth = auth or default_auth()
 
     def fetch(self) -> list[dict]:
         articles: list[dict] = []
         for w in memory.get_watch(kind="subreddit", db_path=self.db_path):
             try:
                 resp = requests.get(
-                    HOT_JSON.format(sub=w["ref"]),
+                    HOT_JSON.format(base=self._auth.base_url, sub=w["ref"]),
                     params={"limit": self.limit},
-                    headers={"User-Agent": USER_AGENT},
+                    headers=self._auth.headers(),
                     timeout=self.timeout,
                 )
                 resp.raise_for_status()

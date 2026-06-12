@@ -130,6 +130,13 @@ class Settings:
     # Per-process cap on how many articles the scorer drains per cycle (cost guard).
     process_batch: int = int(os.getenv("PROCESS_BATCH", "40"))
 
+    # --- Reddit OAuth (script-type app; lifts Railway datacenter 403s).
+    # Create at reddit.com/prefs/apps → script. Without these, the watcher
+    # falls back to keyless (works locally, blocked on Railway). ---
+    reddit_client_id: str = os.getenv("REDDIT_CLIENT_ID", "")
+    reddit_client_secret: str = os.getenv("REDDIT_CLIENT_SECRET", "")
+    reddit_username: str = os.getenv("REDDIT_USERNAME", "")
+
     # --- Crowd wisdom / Genome B (TwitterAPI.io; no key -> module no-ops) ---
     twitter_api_io_key: str = os.getenv("TWITTER_API_IO_KEY", "")
     crowd_min_likes: int = int(os.getenv("CROWD_MIN_LIKES", "1000"))   # CLAUDE.md: 1000+ likes
