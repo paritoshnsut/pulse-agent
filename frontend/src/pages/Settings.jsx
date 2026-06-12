@@ -399,6 +399,12 @@ export default function Settings({ accounts, refreshAccounts }) {
 
       <Card>
         <div className="font-medium mb-2">👀 What it watches</div>
+        <div className="text-sm text-zinc-400 mb-3">
+          🔭 <span className="text-zinc-300 font-medium">Discovery is automatic</span> —
+          the agent already searches YouTube and Reddit for your account's topics
+          every 45 minutes, no setup needed. Add specific channels or subreddits
+          below only to guarantee coverage of sources you never want to miss.
+        </div>
         {watch.map((x) => (
           <div key={x.id} className="flex items-center gap-2 py-1 text-sm">
             <Chip>{x.kind}</Chip>

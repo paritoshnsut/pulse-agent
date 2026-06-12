@@ -132,6 +132,13 @@ def job_wikipedia():
     WikipediaWatcher().run()
 
 
+def job_discover():
+    """Autonomous discovery: search YouTube + Reddit for every account's own
+    topics. No manual watch-list entry — set a niche, the agent goes looking."""
+    from watch.discover import DiscoveryWatcher
+    DiscoveryWatcher().run()
+
+
 def job_twitter():
     TwitterWatcher(enabled=TWITTER_ENABLED).run()
 
@@ -269,7 +276,7 @@ def job_process():
             fmt = s.get("format") or DRAFT_FORMAT
             # YouTube uploads with a fetched transcript get the video_reaction
             # treatment: the draft quotes the video's actual claims.
-            if s.get("source") == "youtube" and s.get("article_id"):
+            if s.get("source") in ("youtube", "yt_search") and s.get("article_id"):
                 excerpt = transcript_excerpt(memory.get_article(s["article_id"]))
                 if excerpt:
                     fmt = "video_reaction"
@@ -314,6 +321,8 @@ JOBS = [
     ("backup", job_backup, 24 * 60),
     ("moments", job_moments, 12 * 60),
 ]
+if settings.discover_enabled:
+    JOBS.append(("discover", job_discover, settings.poll_discover_min))
 if settings.telegram_bot_token and settings.telegram_chat_id:
     JOBS.append(("telegram", job_telegram, settings.poll_telegram_min))
 if TWITTER_ENABLED:

@@ -117,6 +117,11 @@ class Settings:
     poll_trends_min: int = int(os.getenv("POLL_TRENDS_MIN", "30"))
     poll_wikipedia_min: int = int(os.getenv("POLL_WIKIPEDIA_MIN", "60"))
     poll_process_min: int = int(os.getenv("POLL_PROCESS_MIN", "10"))
+    # Autonomous discovery: search YouTube + Reddit for each account's own
+    # topics — no manual watch-list entry needed. Keyless scraping, polled gently.
+    discover_enabled: bool = os.getenv("DISCOVER_ENABLED", "true").lower() == "true"
+    poll_discover_min: int = int(os.getenv("POLL_DISCOVER_MIN", "45"))
+    discover_max_queries: int = int(os.getenv("DISCOVER_MAX_QUERIES", "6"))
 
     # Skip scoring anything older than this at ingest time (don't pay Claude to
     # judge stale news, esp. on first run). 0 disables the cutoff.

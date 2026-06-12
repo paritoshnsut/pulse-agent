@@ -9,7 +9,7 @@
 > Legend: ✅ built · 🟡 partial · ⏸ deferred on purpose (see `DEFERRED.md`) ·
 > ❌ blocked (needs paid API / not started) · 🚫 deliberately skipped
 >
-> Snapshot: **371 tests passing**, single-container deploy (FastAPI + React +
+> Snapshot: **381 tests passing**, single-container deploy (FastAPI + React +
 > always-on agent), live on GitHub (`paritoshnsut/pulse-agent`). Model:
 > `claude-sonnet-4-6`, every call routed through one cost-tracked wrapper.
 
@@ -75,6 +75,7 @@ needed.
 | **Moments calendar** (89 planned moments: festivals, retail, sport, awareness days) | ✅ | 12 h | date-rule engine (fixed/nth-weekday/offset/lookup); lunar dates from lookup tables, never guessed; surfaces at each moment's lead time |
 | YouTube (channel upload RSS + transcripts) | ✅ | 15 min | keyless; transcript unlocks `video_reaction` |
 | Reddit (real upvote velocity) | ✅ | 20 min | keyless JSON |
+| **Autonomous discovery** (YouTube + Reddit search for each account's topics) | ✅ | 45 min | `watch/discover.py`: no manual watch-list entry — queries derived from account topics, deduped across accounts; YouTube via ytInitialData scrape (views/hr velocity, transcripts → video_reaction), Reddit via site-wide search.json (fail-safe: Reddit blocks some datacenter IPs) |
 | Google Trends | ✅ | 30 min | keyless RSS, real traffic velocity |
 | Wikipedia edit-storms | ✅ | 60 min | keyless |
 | Instagram (own account + inspiration shape) | 🟡 | 30 min | stub, auto-enables with `IG_GRAPH_TOKEN`; inspiration refs flow via uploads meanwhile |
@@ -297,13 +298,13 @@ pipeline/   monitor decision context generator scorer poster telegram_bot
             updater callbacks counter evergreen fatigue timing briefing
             grounding integrity feedback llm repurpose memory visuals design
 style/      dna corpus crowd learning scorer brand voice importer
-watch/      youtube reddit trends listening moments twitter(stub) instagram(stub)
+watch/      youtube reddit trends discover listening moments twitter(stub) instagram(stub)
 render/     Node satori service + templates     image/     cards (Pillow fail-safe)
 moments.py  date-rule engine + 89-moment calendar
 presets.py  onboarding starter packs            sources.py  107-feed catalog
 api/        main.py (+ static fallback), studio.py (internal glass-wall API)
 frontend/   React app — two zones: App (customer) + Studio (pages/studio/)
-db/         schema.sql                          tests/     371 tests
+db/         schema.sql                          tests/     381 tests
 DEFERRED.md  parked ideas + triggers           README.md  user/run/deploy guide
 VISUALS.md   the visual system's own status doc
 ```

@@ -135,8 +135,8 @@ class ContextRetriever:
 
 def transcript_excerpt(article: Optional[dict], max_chars: int = 1500) -> Optional[str]:
     """A prompt-sized block of a video's transcript (articles.content for
-    source='youtube'), or None. The video_reaction format quotes from this."""
-    if not article or article.get("source") != "youtube":
+    the youtube sources), or None. The video_reaction format quotes from this."""
+    if not article or article.get("source") not in ("youtube", "yt_search"):
         return None
     content = (article.get("content") or "").strip()
     if not content:
