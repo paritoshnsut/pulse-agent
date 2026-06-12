@@ -19,10 +19,10 @@ PRESETS: dict[str, dict] = {
         "visual": {"accent_color": "#f59e0b", "bg_style": "dark", "font_family": "serif"},
         "label": "Political / news commentator",
         "kind": "commentator",
-        "niche": "sharp, data-backed political commentary, skeptical of spin",
-        "topics": ["politics", "policy", "economy", "elections"],
+        "niche": "political commentary: data-backed contrarian takes on policy, governance, and the gap between what leaders say and what they do — India focus",
+        "topics": ["politics", "policy", "economy", "elections", "governance", "accountability", "data"],
         "verticals": ["politics"],
-        "watch": [("subreddit", "politics"), ("trends_geo", "US")],
+        "watch": [("subreddit", "india"), ("subreddit", "worldnews"), ("trends_geo", "IN")],
     },
     "saas_founder": {
         "visual": {"accent_color": "#6366f1", "bg_style": "dark", "font_family": "sans"},

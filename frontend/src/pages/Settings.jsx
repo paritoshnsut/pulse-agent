@@ -184,12 +184,16 @@ export default function Settings({ accounts, refreshAccounts }) {
       <Card>
         <div className="font-medium mb-2">Accounts</div>
         {accounts.map((a) => (
-          <div key={a.id} className="flex items-center gap-2 py-1 text-sm">
-            <span>@{a.handle}</span>
-            <Chip>{a.niche || 'no niche set'}</Chip>
-            {a.has_voice
-              ? <Chip>voice ✓ v{a.voice_version}</Chip>
-              : <Chip>⚠️ no voice yet</Chip>}
+          <div key={a.id} className="py-1.5 border-b border-zinc-800/60 last:border-0">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium">@{a.handle}</span>
+              {a.has_voice
+                ? <Chip tone="green">voice ✓ v{a.voice_version}</Chip>
+                : <Chip tone="amber">⚠ no voice yet</Chip>}
+            </div>
+            {a.niche && (
+              <div className="text-xs text-zinc-500 mt-0.5 leading-relaxed">{a.niche}</div>
+            )}
           </div>
         ))}
         {presets.length > 0 && (
@@ -201,14 +205,20 @@ export default function Settings({ accounts, refreshAccounts }) {
             </select>
           </div>
         )}
-        <div className="grid md:grid-cols-3 gap-2 mt-2">
+        <div className="grid md:grid-cols-2 gap-2 mt-2">
           <Input placeholder="handle (no @)" value={form.handle}
                  onInput={(e) => setForm({ ...form, handle: e.target.value })} />
-          <Input placeholder="niche — be specific, this drives everything" value={form.niche}
-                 onInput={(e) => setForm({ ...form, niche: e.target.value })} />
-          <Input placeholder="topics, comma separated" value={form.topics}
+          <Input placeholder="topics, comma separated (e.g. politics, policy, economy)"
+                 value={form.topics}
                  onInput={(e) => setForm({ ...form, topics: e.target.value })} />
         </div>
+        <textarea rows={2}
+          placeholder="niche — be specific, this is injected into every scoring and generation prompt (e.g. political commentary: data-backed contrarian takes on policy and governance — India focus)"
+          value={form.niche}
+          onInput={(e) => setForm({ ...form, niche: e.target.value })}
+          className="w-full mt-2 bg-zinc-900 border border-zinc-700/70 rounded-lg p-3 text-sm
+            placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60
+            focus:ring-1 focus:ring-indigo-500/30 transition-colors resize-none" />
         <div className="mt-2">
           <Btn color="blue" disabled={!form.handle} onClick={createAccount}>Add account</Btn>
           {form.kind && <span className="text-xs text-zinc-500 ml-2">type: {form.kind}</span>}
