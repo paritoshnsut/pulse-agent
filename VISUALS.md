@@ -81,6 +81,31 @@ charts, three fonts, gradient fallback"), closed in one build:
 | **Procedural hero backgrounds.** `render/art.mjs`: seeded compositions in the brand palette — orbs / mesh corners / diagonal beams / horizon glow. Deterministic (same seed+accent = same art, so regenerate doesn't reshuffle an approved card). Hero with no image now gets art, never a flat gradient — every account looks designed from day 1, keyless and free. Photos keep the strong scrim; art gets a soft one (it's already dark). | ✅ |
 | **Custom brand fonts.** `POST /api/accounts/{id}/font` (TTF/OTF, weight 400/700, magic-bytes validated) → saved by convention as `render/fonts/custom/acct{id}-{weight}.ttf` (gitignored), kit `font_family='custom'` — no schema change. Server loads custom fonts lazily per render, cached by mtime (re-upload applies without restart). Missing file → stack falls back to bundled fonts + Noto Sans, never tofu. DELETE endpoint reverts to `sans`. | ✅ |
 
+## Phase V1.9 — the visual blueprint engine (SHIPPED)
+
+The reframe: users don't need "images", they need **visual communication of
+ideas** — and the highest-performing organic visuals on LinkedIn/X/IG are
+*structured* graphics (comparisons, frameworks, timelines, process flows,
+lists), not artwork. LLMs are good at structure, bad at design → Claude
+extracts a typed blueprint (`pipeline/blueprint.py`), the deterministic
+templates (`render/blueprints.mjs`) own every pixel. Same cost posture as
+chart_card: one bounded call, "extract never invent", cached on the post
+(misses too; transient failures retry).
+
+| Item | Status |
+|---|---|
+| `comparison_card` — X vs Y panels (yours gets the accent treatment), SVG ✓/✕ markers, centered "vs" chip | ✅ |
+| `framework_card` — 3-5 numbered pillars of one idea, equal cards in a row | ✅ |
+| `timeline_card` — 3-6 dated milestones on a horizontal rail, "now" dot filled accent | ✅ |
+| `process_card` — 3-5 sequential steps joined by SVG arrows | ✅ |
+| `list_card` — 3-6 numbered tips/mistakes/rules; the title is the hook | ✅ |
+| Shared primitives extracted to `render/ui.mjs` (theme, frame, footer, number chip) — templates.mjs and blueprints.mjs stay consistent by construction | ✅ |
+| Auto-pick: explainer / evergreen / counter_narrative try a blueprint before settling for a text card; carousel formats keep their multi-slide treatment; hot_take stays punchy (never attempts) | ✅ |
+| Explicit swap: any post can request any blueprint template; the ask biases the extraction prompt but "prefer null over a weak structure" still holds; no structure → graceful fall-through | ✅ |
+| **Glyph rule learned:** ✓ ✕ → are NOT in the merged font subsets — every marker/arrow in templates is now an SVG path (`icons.mjs`), never a text glyph | ✅ |
+| Square (1080×1080) variants of the blueprint cards for IG feed | ⏳ |
+| 9:16 story/reel template | ⏳ |
+
 ## Phase V2 — the AI-imagery design agent (V2a SHIPPED)
 
 The user-insight this encodes: human designers already work as

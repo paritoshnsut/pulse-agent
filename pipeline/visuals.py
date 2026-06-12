@@ -193,6 +193,12 @@ def brand_payload(account: dict, kit: Optional[dict]) -> dict:
 # --------------------------------------------------------------------------- #
 CAROUSEL_FORMATS = ("thread", "linkedin_post", "newsletter")
 
+# Formats that auto-try a visual blueprint (comparison/framework/timeline/
+# process/list) before settling for a text card. Carousel formats keep their
+# multi-slide treatment; punchy formats (hot_take) stay punchy. Any post can
+# still request a blueprint explicitly via the template-swap control.
+BLUEPRINT_AUTO_FORMATS = ("explainer", "evergreen", "counter_narrative")
+
 
 def split_into_slides(post: dict, kit: Optional[dict] = None) -> Optional[dict]:
     """Break a multi-idea post into carousel slides:
@@ -409,6 +415,21 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             return hero
         template = None
 
+    def _render_structured(tmpl: str, spec: dict) -> Optional[str]:
+        """Render an extracted structure (chart/blueprint) and save it."""
+        brand = brand_payload(account, kit)
+        data = {**spec, "seed": post.get("id") or 0}
+        png = r.render(tmpl, data, brand)
+        if png is None:
+            png = PillowRenderer().render(tmpl, data, brand)
+        if png is None:
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        path = _save(png, f"post{post_id}-{stamp}.png")
+        memory.update_post_meta(post_id, {"visual": path.name}, db_path=db_path)
+        logger.info("Visual for #%d: %s via %s", post_id, path.name, tmpl)
+        return str(path)
+
     # data visualization: an explicit chart_card request, or a data_story on
     # auto-pick, tries the chart spec (cached on the post; one Claude call
     # max, behind the free numeric gate). No series -> normal card path.
@@ -421,20 +442,33 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             logger.warning("Chart path failed for #%d: %s", post_id, exc)
             spec = None
         if spec:
-            brand = brand_payload(account, kit)
-            data = {**spec, "seed": post.get("id") or 0}
-            png = r.render("chart_card", data, brand)
-            if png is None:
-                png = PillowRenderer().render("chart_card", data, brand)
-            if png is not None:
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-                path = _save(png, f"post{post_id}-{stamp}.png")
-                memory.update_post_meta(post_id, {"visual": path.name},
-                                        db_path=db_path)
-                logger.info("Visual for #%d: %s via chart_card", post_id, path.name)
-                return str(path)
+            out = _render_structured("chart_card", spec)
+            if out:
+                return out
         if template == "chart_card":
             template = None       # explicit ask but no series: auto-pick card
+
+    # visual blueprints: comparison/framework/timeline/process/list — the
+    # structures top creators actually post. Explicit template swap extracts
+    # that type; auto-eligible formats let Claude pick (or decline). The
+    # blueprint (or the miss) is cached on the post — one call max.
+    from pipeline.blueprint import TEMPLATE_FOR, TYPE_FOR
+    want = TYPE_FOR.get(template or "")
+    if want or (template is None
+                and post.get("format") in BLUEPRINT_AUTO_FORMATS):
+        try:
+            from pipeline.blueprint import BlueprintExtractor
+            bp = BlueprintExtractor().blueprint_for(post, want=want,
+                                                    db_path=db_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Blueprint path failed for #%d: %s", post_id, exc)
+            bp = None
+        if bp:
+            out = _render_structured(TEMPLATE_FOR[bp["type"]], bp)
+            if out:
+                return out
+        if want:
+            template = None       # explicit ask, no structure: auto-pick card
 
     if template is None and (post.get("format") or "") in CAROUSEL_FORMATS:
         cover = generate_carousel(post, account, kit, r, db_path=db_path)

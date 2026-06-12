@@ -6,107 +6,21 @@
 // where brand carries accent/secondary colors, bg style, font family and
 // watermark from the account's brand kit, with tasteful defaults when unset.
 //
-// Three layers compose every card now (VISUALS "illustration" build):
-//   art    — seeded procedural background (hero) — art.mjs
-//   decor  — topic icon + geometric motif at low opacity — icons.mjs
-//   chart  — deterministic bar/line data visualization — charts.mjs
+// The library is split by concern:
+//   ui.mjs         — theme/brand mapping + shared primitives (frame, footer…)
+//   icons.mjs      — topic icons + decorative geometry
+//   art.mjs        — seeded procedural backgrounds
+//   charts.mjs     — bar/line data visualization
+//   blueprints.mjs — structured idea visuals (comparison/framework/timeline/
+//                    process/list) extracted by pipeline/blueprint.py
+//   this file      — the core cards + carousel + the TEMPLATES registry
 
-import { decorLayer } from "./icons.mjs";
+import { SIZE, SQUARE, theme, el, accentBar, footer, frame,
+         fitFontSize } from "./ui.mjs";
+import { decorLayer, iconNode } from "./icons.mjs";
 import { artLayers } from "./art.mjs";
 import { chartNode } from "./charts.mjs";
-
-const SIZE = { width: 1200, height: 675 };      // 16:9 — single cards (X/LinkedIn)
-const SQUARE = { width: 1080, height: 1080 };   // 1:1 — carousel slides (LinkedIn/IG)
-
-const DEFAULTS = {
-  accent_color: "#4da3ff",
-  secondary_color: "#9aa4b2",
-  bg_style: "dark",
-  font_family: "sans",
-};
-
-const FONT_NAMES = { sans: "Inter", serif: "Lora", mono: "JetBrains Mono" };
-
-function theme(brand) {
-  const b = { ...DEFAULTS, ...Object.fromEntries(
-    Object.entries(brand || {}).filter(([, v]) => v)) };
-  const dark = b.bg_style !== "light";
-  // custom = an uploaded brand font, registered by the server per render as
-  // family `Custom-<key>`; stack still ends in Noto Sans for glyph fallback.
-  const family = b.font_family === "custom" && b.custom_font_key
-    ? `Custom-${b.custom_font_key}`
-    : FONT_NAMES[b.font_family] || "Inter";
-  return {
-    accent: b.accent_color,
-    secondary: b.secondary_color,
-    // Noto Sans ends every stack: cross-family glyph fallback (₹ etc.)
-    font: `${family}, Noto Sans`,
-    fg: dark ? "#f0f2f5" : "#16181d",
-    muted: dark ? "#8b94a1" : "#6b7280",
-    background: b.bg_style === "gradient"
-      ? `linear-gradient(135deg, #101319 0%, #1a2030 55%, ${b.accent_color}33 100%)`
-      : dark ? "#101319" : "#fafafa",
-    watermark: b.watermark_text || "",
-    handle: b.handle || "",
-    logo: b.logo || null,   // {src: dataURL, width, height} prepared by Python
-    decor_style: b.decor_style || "subtle",  // none | subtle | bold
-  };
-}
-
-// Auto-fit: longer text -> smaller type, so nothing overflows the canvas.
-export function fitFontSize(text, base = 58, min = 30) {
-  const n = (text || "").length;
-  if (n <= 90) return base;
-  if (n <= 160) return 48;
-  if (n <= 240) return 40;
-  if (n <= 340) return 34;
-  return min;
-}
-
-const el = (type, style, children) => ({ type, props: { style, ...(children !== undefined ? { children } : {}) } });
-
-// frame: relative canvas with the decoration layer UNDER a full-bleed content
-// column — decor never collides with or reflows the text.
-function frame(t, children, data = {}) {
-  const decor = decorLayer(t, { style: t.decor_style,
-                                icon: data.icon || null,
-                                seed: data.seed || 0 });
-  return el("div", {
-    width: "100%", height: "100%", display: "flex", position: "relative",
-    background: t.background, fontFamily: t.font,
-  }, [
-    ...decor,
-    el("div", {
-      position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-      display: "flex", flexDirection: "column", color: t.fg,
-      padding: "64px 72px", justifyContent: "space-between",
-    }, children),
-  ]);
-}
-
-function accentBar(t) {
-  return el("div", { width: 88, height: 10, background: t.accent, borderRadius: 5 });
-}
-
-function footer(t) {
-  const left = [];
-  if (t.logo) {
-    left.push({ type: "img", props: {
-      src: t.logo.src, width: t.logo.width, height: t.logo.height,
-      style: { width: t.logo.width, height: t.logo.height },
-    } });
-  }
-  if (t.handle) {
-    left.push(el("div", { fontSize: 26, fontWeight: 700, color: t.accent, display: "flex" },
-      `@${t.handle.replace(/^@/, "")}`));
-  }
-  return el("div", {
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-  }, [
-    el("div", { display: "flex", alignItems: "center", gap: 14 }, left),
-    el("div", { fontSize: 22, color: t.muted, display: "flex" }, t.watermark || " "),
-  ]);
-}
+import { BLUEPRINT_TEMPLATES } from "./blueprints.mjs";
 
 // ---------------------------------------------------------------- templates
 export function quoteCard(data, brand) {
@@ -287,7 +201,11 @@ export function carouselCover(data, brand) {
         ? el("div", { fontSize: 28, fontWeight: 700, color: t.accent, display: "flex" },
             `@${t.handle.replace(/^@/, "")}`)
         : el("div", { display: "flex" }),
-      el("div", { fontSize: 28, color: t.muted, display: "flex" }, "swipe →"),
+      // arrow is SVG, not a text glyph (the merged subsets lack U+2192)
+      el("div", { display: "flex", alignItems: "center", gap: 10 }, [
+        el("div", { fontSize: 28, color: t.muted, display: "flex" }, "swipe"),
+        iconNode("arrow_right", 28, t.muted, 1, 2.2),
+      ]),
     ]),
   ], data);
 }
@@ -333,6 +251,7 @@ export const TEMPLATES = {
   carousel_cover: carouselCover,
   carousel_slide: carouselSlide,
   carousel_cta: carouselCta,
+  ...BLUEPRINT_TEMPLATES,
 };
 
 export const TEMPLATE_SIZES = {
@@ -341,4 +260,4 @@ export const TEMPLATE_SIZES = {
   carousel_cta: SQUARE,
 };
 
-export { SIZE };
+export { SIZE, fitFontSize };
