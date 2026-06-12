@@ -53,6 +53,40 @@ from config import settings
 from pipeline.llm import tracked_create
 from pipeline import memory
 from pipeline.generator import CHOOSABLE_FORMATS
+from style.dna import STOPWORDS
+
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z']+")
+
+
+def _account_topic_words(account: dict) -> frozenset[str]:
+    """Build the keyword bag for pre-filtering from account topics + niche.
+    Call once per run() invocation and pass the result into the article loop."""
+    words: set[str] = set()
+    try:
+        topics = json.loads(account.get("topics") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        topics = []
+    for phrase in topics:
+        for w in _WORD_RE.findall(str(phrase)):
+            w = w.lower()
+            if len(w) >= 3 and w not in STOPWORDS:
+                words.add(w)
+    for w in _WORD_RE.findall(account.get("niche") or ""):
+        w = w.lower()
+        if len(w) >= 3 and w not in STOPWORDS:
+            words.add(w)
+    return frozenset(words)
+
+
+def _passes_keyword_prefilter(article: dict, topic_words: frozenset[str]) -> bool:
+    """True → send to Claude.  False → pre-skip at zero cost.
+    Only skips when zero article words intersect the account's topic bag.
+    Returns True whenever the topic bag is empty (no filter defined)."""
+    if not topic_words:
+        return True
+    text = (f"{article.get('title') or ''} {article.get('description') or ''}").lower()
+    article_words = frozenset(w.lower() for w in _WORD_RE.findall(text))
+    return bool(topic_words & article_words)
 
 logger = logging.getLogger("decision")
 
@@ -412,7 +446,9 @@ class DecisionAgent:
         first run doesn't burn Claude calls on yesterday's news.
         """
         now = datetime.now(timezone.utc)
-        tally = {"FIRE": 0, "WARM": 0, "COOL": 0, "SKIP": 0, "stale_skipped": 0}
+        tally = {"FIRE": 0, "WARM": 0, "COOL": 0, "SKIP": 0,
+                 "stale_skipped": 0, "pre_filtered": 0}
+        topic_words = _account_topic_words(account)
         # One approve/reject performance lookup per run, applied to every
         # article in the batch. Lazy import keeps pipeline->style coupling soft.
         try:
@@ -430,6 +466,13 @@ class DecisionAgent:
             try:
                 if self._is_stale(art, now):
                     tally["stale_skipped"] += 1
+                    if per_account:
+                        memory.mark_scored(account["id"], art["id"], db_path=db_path)
+                    else:
+                        memory.mark_processed(art["id"], db_path=db_path)
+                    continue
+                if not _passes_keyword_prefilter(art, topic_words):
+                    tally["pre_filtered"] += 1
                     if per_account:
                         memory.mark_scored(account["id"], art["id"], db_path=db_path)
                     else:
@@ -457,6 +500,14 @@ class DecisionAgent:
                             vflag, art["title"][:64])
             except Exception as exc:  # noqa: BLE001
                 logger.error("Scoring failed for article %s: %s", art.get("id"), exc)
+        logger.info(
+            "[%s] scored: FIRE=%d WARM=%d COOL=%d SKIP=%d | "
+            "stale_skipped=%d pre_filtered=%d (saved ~$%.4f)",
+            account.get("handle", "?"),
+            tally["FIRE"], tally["WARM"], tally["COOL"], tally["SKIP"],
+            tally["stale_skipped"], tally["pre_filtered"],
+            tally["pre_filtered"] * 0.0077,
+        )
         return tally
 
 

@@ -141,3 +141,100 @@ def test_run_scores_and_marks_processed(temp_db):
     assert tally["FIRE"] + tally["WARM"] + tally["COOL"] + tally["SKIP"] == 1
     # per-account queue is now empty for this account (it recorded the score)
     assert memory.get_unscored_for_account(account, db_path=temp_db) == []
+
+
+# ======================================================= keyword pre-filter
+
+def test_topic_words_parsed_from_topics_and_niche():
+    from pipeline.decision import _account_topic_words
+    account = {
+        "topics": '["economic policy", "BJP criticism", "fiscal data"]',
+        "niche": "skeptical of govt spin",
+    }
+    words = _account_topic_words(account)
+    assert "economic" in words
+    assert "policy" in words
+    assert "bjp" in words
+    assert "criticism" in words
+    assert "fiscal" in words
+    assert "skeptical" in words
+    assert "govt" in words
+    # stopwords filtered out
+    assert "of" not in words
+
+
+def test_topic_words_empty_when_no_profile():
+    from pipeline.decision import _account_topic_words
+    assert _account_topic_words({}) == frozenset()
+    assert _account_topic_words({"topics": "[]", "niche": ""}) == frozenset()
+
+
+def test_prefilter_passes_matching_article():
+    from pipeline.decision import _account_topic_words, _passes_keyword_prefilter
+    account = {"topics": '["economic policy"]', "niche": ""}
+    words = _account_topic_words(account)
+    art = {"title": "RBI cuts rate amid economic slowdown", "description": ""}
+    assert _passes_keyword_prefilter(art, words) is True
+
+
+def test_prefilter_blocks_unrelated_article():
+    from pipeline.decision import _account_topic_words, _passes_keyword_prefilter
+    account = {"topics": '["economic policy", "BJP criticism"]', "niche": ""}
+    words = _account_topic_words(account)
+    art = {"title": "Virat Kohli scores century in IPL final", "description": "Cricket match recap"}
+    assert _passes_keyword_prefilter(art, words) is False
+
+
+def test_prefilter_passes_when_no_topics_defined():
+    from pipeline.decision import _passes_keyword_prefilter
+    # empty topic bag → never filter (fail-safe: score everything)
+    art = {"title": "Completely unrelated content", "description": ""}
+    assert _passes_keyword_prefilter(art, frozenset()) is True
+
+
+def test_prefilter_match_is_case_insensitive():
+    from pipeline.decision import _account_topic_words, _passes_keyword_prefilter
+    account = {"topics": '["GDP growth"]', "niche": ""}
+    words = _account_topic_words(account)
+    art = {"title": "gdp GROWTH slows in Q4", "description": ""}
+    assert _passes_keyword_prefilter(art, words) is True
+
+
+def test_run_increments_pre_filtered_and_marks_scored(temp_db):
+    """Pre-filtered articles must be marked scored (not re-queued) and
+    must not trigger a Claude call."""
+    from pipeline import memory
+    import json as _json
+
+    acct_id = memory.upsert_account(
+        handle="econbot",
+        topics=_json.dumps(["economic policy", "fiscal data"]),
+        niche="India macro commentary",
+        db_path=temp_db,
+    )
+    account = memory.get_account(acct_id, db_path=temp_db)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # this article has zero overlap with the account's topics
+    memory.insert_article(
+        {"source": "rss", "url": "http://x/cricket1",
+         "title": "Rohit Sharma hits double century in Test match",
+         "description": "Cricket news", "vertical": None, "region": None,
+         "published_at": now},
+        db_path=temp_db,
+    )
+
+    judge_calls = []
+    agent = _agent("{}")
+    original_judge = agent.judge
+
+    def tracking_judge(article, acct):
+        judge_calls.append(article)
+        return original_judge(article, acct)
+
+    agent.judge = tracking_judge
+    tally = agent.run(account, db_path=temp_db)
+
+    assert tally["pre_filtered"] == 1
+    assert len(judge_calls) == 0           # Claude was never called
+    assert memory.get_unscored_for_account(account, db_path=temp_db) == []
