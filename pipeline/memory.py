@@ -883,6 +883,23 @@ def find_articles_fetched_after(keywords: list[str], fetched_after: str,
         return [dict(r) for r in rows]
 
 
+def account_has_signal_for_articles(account_id: int, article_ids: list,
+                                    db_path: Optional[str] = None) -> bool:
+    """True if this account already produced a signal for any of the given article ids.
+    Used by the story-dedup gate: if we already scored one article about a story,
+    subsequent articles about the same story don't need another Claude call."""
+    if not article_ids:
+        return False
+    placeholders = ",".join("?" * len(article_ids))
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            f"SELECT 1 FROM signals WHERE account_id = ? "
+            f"AND article_id IN ({placeholders}) LIMIT 1",
+            [account_id] + list(article_ids),
+        ).fetchone()
+        return row is not None
+
+
 def touch_prediction_checked(prediction_id: int, checked_at: Optional[str] = None,
                              db_path: Optional[str] = None) -> None:
     """Advance the callback watcher's cursor so each article is judged at most

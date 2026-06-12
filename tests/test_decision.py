@@ -238,3 +238,100 @@ def test_run_increments_pre_filtered_and_marks_scored(temp_db):
     assert tally["pre_filtered"] == 1
     assert len(judge_calls) == 0           # Claude was never called
     assert memory.get_unscored_for_account(account, db_path=temp_db) == []
+
+
+# ======================================================= story dedup gate
+
+def test_story_already_scored_false_when_no_signals(temp_db):
+    from pipeline.decision import _story_already_scored
+    art = {"id": 1, "title": "RBI holds interest rate steady", "description": ""}
+    assert _story_already_scored(art, account_id=1, db_path=temp_db) is False
+
+
+def test_story_already_scored_false_when_no_keywords(temp_db):
+    from pipeline.decision import _story_already_scored
+    art = {"id": 1, "title": "a", "description": ""}  # too short for keywords
+    assert _story_already_scored(art, account_id=1, db_path=temp_db) is False
+
+
+def test_story_already_scored_true_after_related_scored(temp_db):
+    from pipeline.decision import _story_already_scored
+    from pipeline import memory
+
+    acct_id = memory.upsert_account(handle="rbibot", db_path=temp_db)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # First article about RBI — already scored
+    first_id, _ = memory.insert_article(
+        {"source": "rss", "url": "http://hindu.com/rbi1",
+         "title": "RBI holds repo rate at 6.5 percent amid inflation",
+         "description": "Reserve Bank of India decision",
+         "published_at": now},
+        db_path=temp_db,
+    )
+    # Insert a signal for it (simulates it having been scored already)
+    memory.insert_signal({
+        "article_id": first_id, "account_id": acct_id,
+        "score": 7.5, "tier": "WARM",
+        "velocity": 5, "relevance": 8, "corroboration": 6,
+        "reaction_potential": 7, "memory_leverage": 3,
+        "window_urgency": 8, "historical_perf": 5,
+        "angle": "test", "topic": "rbi-rate-policy",
+        "format": "hot_take", "brand_safety": 9,
+        "sensitivity": "safe", "reasoning": "test",
+    }, db_path=temp_db)
+
+    # Second article — same story, different outlet
+    second_art = {
+        "id": None,  # not yet inserted, pass directly
+        "title": "RBI keeps interest rate unchanged policy decision",
+        "description": "Monetary policy committee rate hold",
+    }
+    # The dedup must find the first article via shared keywords and return True
+    assert _story_already_scored(second_art, account_id=acct_id, db_path=temp_db) is True
+
+
+def test_run_story_deduped_skips_claude(temp_db):
+    from pipeline import memory
+    import json as _json
+
+    acct_id = memory.upsert_account(handle="rbibot2", db_path=temp_db)
+    account = memory.get_account(acct_id, db_path=temp_db)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Score the first article via run() so a real signal is written
+    first_id, _ = memory.insert_article(
+        {"source": "rss", "url": "http://hindu.com/rbi2",
+         "title": "RBI holds repo rate unchanged amid inflation pressure",
+         "description": "Reserve Bank monetary policy decision",
+         "published_at": now},
+        db_path=temp_db,
+    )
+    payload = _json.dumps({"relevance": 8, "reaction_potential": 7,
+                            "angle": "rate hold angle", "reasoning": "good fit",
+                            "topic": "rbi-rate-policy", "format": "hot_take",
+                            "brand_safety": 9, "sensitivity": "safe"})
+    _agent(payload).run(account, db_path=temp_db)
+
+    # Now insert a duplicate story article
+    memory.insert_article(
+        {"source": "rss", "url": "http://et.com/rbi2",
+         "title": "RBI keeps repo rate at 6.5 percent unchanged decision",
+         "description": "Monetary policy repo rate unchanged",
+         "published_at": now},
+        db_path=temp_db,
+    )
+
+    judge_calls = []
+    agent = _agent(payload)
+    original_judge = agent.judge
+
+    def tracking_judge(art, acct):
+        judge_calls.append(art)
+        return original_judge(art, acct)
+
+    agent.judge = tracking_judge
+    tally = agent.run(account, db_path=temp_db)
+
+    assert tally["story_deduped"] >= 1
+    assert len(judge_calls) == 0   # second article never hit Claude

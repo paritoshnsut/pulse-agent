@@ -88,6 +88,36 @@ def _passes_keyword_prefilter(article: dict, topic_words: frozenset[str]) -> boo
     article_words = frozenset(w.lower() for w in _WORD_RE.findall(text))
     return bool(topic_words & article_words)
 
+
+def _story_already_scored(article: dict, account_id: int,
+                           window_hours: int = 8,
+                           db_path: Optional[str] = None) -> bool:
+    """True if we already scored a signal for this story (same account, last
+    `window_hours`). Works by finding related articles (≥1 shared keyword in
+    the last window) that already have a signal row for this account.
+
+    The pattern in practice: "RBI holds rate" → The Hindu scores it WARM →
+    Indian Express / LiveMint / ET / NDTV / PTI all publish the same story
+    within the next hour → all 5 hit this check, find the Hindu signal, skip.
+    One Claude call instead of six."""
+    from pipeline.context import extract_keywords
+    keywords = extract_keywords(article.get("title"), article.get("description"))
+    if not keywords:
+        return False
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+        related = memory.find_articles_fetched_after(keywords, since, limit=40,
+                                                      db_path=db_path)
+        related_ids = [r["id"] for r in related
+                       if r.get("id") and r.get("id") != article.get("id")]
+        if not related_ids:
+            return False
+        return memory.account_has_signal_for_articles(account_id, related_ids,
+                                                       db_path=db_path)
+    except Exception as exc:  # noqa: BLE001 — fail open: score the article anyway
+        logger.debug("story_dedup check failed, scoring anyway: %s", exc)
+        return False
+
 logger = logging.getLogger("decision")
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
@@ -447,7 +477,7 @@ class DecisionAgent:
         """
         now = datetime.now(timezone.utc)
         tally = {"FIRE": 0, "WARM": 0, "COOL": 0, "SKIP": 0,
-                 "stale_skipped": 0, "pre_filtered": 0}
+                 "stale_skipped": 0, "pre_filtered": 0, "story_deduped": 0}
         topic_words = _account_topic_words(account)
         # One approve/reject performance lookup per run, applied to every
         # article in the batch. Lazy import keeps pipeline->style coupling soft.
@@ -478,6 +508,13 @@ class DecisionAgent:
                     else:
                         memory.mark_processed(art["id"], db_path=db_path)
                     continue
+                if _story_already_scored(art, account["id"], db_path=db_path):
+                    tally["story_deduped"] += 1
+                    if per_account:
+                        memory.mark_scored(account["id"], art["id"], db_path=db_path)
+                    else:
+                        memory.mark_processed(art["id"], db_path=db_path)
+                    continue
                 signal = self.score_article(art, account, now=now,
                                             hist_perf=hist_perf, db_path=db_path)
                 memory.insert_signal(signal, db_path=db_path)
@@ -500,13 +537,14 @@ class DecisionAgent:
                             vflag, art["title"][:64])
             except Exception as exc:  # noqa: BLE001
                 logger.error("Scoring failed for article %s: %s", art.get("id"), exc)
+        free_skips = tally["stale_skipped"] + tally["pre_filtered"] + tally["story_deduped"]
         logger.info(
             "[%s] scored: FIRE=%d WARM=%d COOL=%d SKIP=%d | "
-            "stale_skipped=%d pre_filtered=%d (saved ~$%.4f)",
+            "stale=%d pre_filtered=%d story_deduped=%d → saved ~$%.4f",
             account.get("handle", "?"),
             tally["FIRE"], tally["WARM"], tally["COOL"], tally["SKIP"],
-            tally["stale_skipped"], tally["pre_filtered"],
-            tally["pre_filtered"] * 0.0077,
+            tally["stale_skipped"], tally["pre_filtered"], tally["story_deduped"],
+            free_skips * 0.00345,
         )
         return tally
 
