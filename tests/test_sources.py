@@ -6,8 +6,11 @@ import sources
 from sources import feeds_for
 
 
-def test_all_four_verticals_present():
-    assert set(sources.VERTICALS) == {"politics", "finance", "sports", "entertainment"}
+def test_core_and_brand_verticals_present():
+    # the original news verticals plus the brand/marketing lanes
+    assert {"politics", "finance", "sports", "entertainment"} <= set(sources.VERTICALS)
+    assert {"business", "tech", "marketing", "lifestyle", "wellness",
+            "culture"} <= set(sources.VERTICALS)
 
 
 def test_feeds_for_returns_well_formed_specs():

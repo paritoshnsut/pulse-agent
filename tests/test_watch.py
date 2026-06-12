@@ -5,6 +5,7 @@ import pytest
 
 from watch import reddit, trends, youtube
 from watch.twitter import TwitterWatcher
+from watch.instagram import InstagramWatcher
 
 
 # ------------------------------------------------------------------ reddit
@@ -121,3 +122,27 @@ def test_twitter_enabled_without_impl_raises():
     w = TwitterWatcher(enabled=True)
     with pytest.raises(NotImplementedError):
         w.fetch()
+
+
+# ---------------------------------------------------------------- instagram
+def test_instagram_disabled_by_default_without_token(monkeypatch):
+    monkeypatch.delenv("IG_GRAPH_TOKEN", raising=False)
+    w = InstagramWatcher()
+    assert w.enabled is False
+    assert w.fetch() == []
+    assert w.run()["skipped"] == "disabled"
+
+
+def test_instagram_auto_enables_with_token(monkeypatch):
+    monkeypatch.setenv("IG_GRAPH_TOKEN", "tok")
+    w = InstagramWatcher()
+    assert w.enabled is True
+    with pytest.raises(NotImplementedError):
+        w.fetch()
+
+
+def test_instagram_shape_is_inspiration():
+    shape = InstagramWatcher._example_shape()
+    assert shape["source"] == "instagram"
+    assert shape["intent"] == "inspiration"
+    assert "media_url" in shape

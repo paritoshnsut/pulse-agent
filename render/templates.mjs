@@ -136,6 +136,55 @@ export function insightCard(data, brand) {
   ]);
 }
 
+// --------------------------------------------------------------- hero card
+// The V2 composite (VISUALS.md): an imagery layer underneath (AI-generated or
+// an approved library background, prepared by Python as a sized data-URL) with
+// the deterministic Satori text/brand layer on top — "designed" richness
+// without trusting an image model to spell. Text sits on a darkening scrim,
+// so the foreground is always light regardless of the kit's bg_style.
+export function heroCard(data, brand) {
+  const t = theme(brand);
+  const text = data.text || "";
+  const img = data.image || null;  // {src: dataURL, width, height} or null
+  const layers = [];
+  if (img) {
+    layers.push({ type: "img", props: {
+      src: img.src, width: SIZE.width, height: SIZE.height,
+      style: { position: "absolute", top: 0, left: 0,
+               width: SIZE.width, height: SIZE.height, objectFit: "cover" },
+    } });
+  } else {
+    layers.push(el("div", {
+      position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+      background: `linear-gradient(135deg, #101319 0%, #1a2030 55%, ${t.accent}55 100%)`,
+      display: "flex",
+    }));
+  }
+  layers.push(el("div", {
+    position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+    background: "linear-gradient(180deg, rgba(8,10,14,0.20) 0%, rgba(8,10,14,0.78) 100%)",
+    display: "flex",
+  }));
+  const overlayT = { ...t, fg: "#f5f7fa", muted: "rgba(245,247,250,0.75)" };
+  layers.push(el("div", {
+    position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+    display: "flex", flexDirection: "column", color: overlayT.fg,
+    padding: "64px 72px", justifyContent: "space-between",
+  }, [
+    accentBar(overlayT),
+    el("div", {
+      fontSize: fitFontSize(text, 64, 34), fontWeight: 700, lineHeight: 1.22,
+      display: "flex", flexGrow: 1, alignItems: "flex-end",
+      paddingBottom: 36, textShadow: "0 2px 12px rgba(0,0,0,0.55)",
+    }, text),
+    footer(overlayT),
+  ]));
+  return el("div", {
+    width: "100%", height: "100%", display: "flex", position: "relative",
+    fontFamily: t.font,
+  }, layers);
+}
+
 // ------------------------------------------------------- carousel slides
 // Square multi-slide format: cover (the hook + swipe cue) -> content slides
 // (numbered, one idea each) -> CTA closer. Python orchestrates the sequence;
@@ -216,6 +265,7 @@ export function carouselCta(data, brand) {
 
 export const TEMPLATES = {
   quote_card: quoteCard,
+  hero_card: heroCard,
   stat_highlight: statHighlight,
   insight_card: insightCard,
   carousel_cover: carouselCover,

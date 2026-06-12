@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -63,13 +64,19 @@ from style.scorer import PersonaConsistencyScorer
 from watch.reddit import RedditWatcher
 from watch.trends import TrendsWatcher, WikipediaWatcher
 from watch.twitter import TwitterWatcher
+from watch.instagram import InstagramWatcher
+from watch.moments import MomentsWatcher
+from watch.listening import custom_feed_specs, merge_feed_specs
 from watch.youtube import YouTubeWatcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(message)s",
                     datefmt="%H:%M:%S")
 logger = logging.getLogger("scheduler")
 
-# What the news monitor pulls. Edit to taste (mirrors run_pipeline.py).
+# Fallback lanes when there are no accounts yet (first boot). Once accounts
+# exist, job_news pulls the UNION of their verticals instead (see active_news_
+# verticals) so a brand persona's lanes get fetched and a politics-only setup
+# never wastes fetches on marketing feeds.
 NEWS_VERTICALS = ["politics", "finance", "sports", "entertainment"]
 NEWS_REGIONS = ["india", "us"]
 
@@ -82,8 +89,31 @@ TWITTER_ENABLED = False  # flip to True only after you implement watch/twitter.p
 # --------------------------------------------------------------------------- #
 # Jobs
 # --------------------------------------------------------------------------- #
+def active_news_verticals() -> list[str]:
+    """The lanes to actually fetch: the union of active accounts' verticals,
+    intersected with verticals we have feeds for. An account with no verticals
+    set means 'all', so any unscoped persona pulls the whole catalog. Falls back
+    to NEWS_VERTICALS before any account exists."""
+    from sources import VERTICALS as ALL
+    accounts = memory.list_active_accounts()
+    if not accounts:
+        return NEWS_VERTICALS
+    chosen: set[str] = set()
+    for a in accounts:
+        vs = a.get("verticals")
+        if not vs:                      # null/[] -> sees everything
+            return list(ALL)
+        chosen.update(vs)
+    return [v for v in ALL if v in chosen] or NEWS_VERTICALS
+
+
 def job_news():
-    NewsMonitor(rss_feeds=feeds_for(NEWS_VERTICALS, NEWS_REGIONS)).run()
+    # regions=None -> every region, so global-only brand feeds (HN, marketing,
+    # etc.) get ingested; per-account region scoping still narrows what's scored.
+    # Custom rss_feed/news_query watch rows ride along (per-brand listening).
+    feeds = merge_feed_specs(feeds_for(active_news_verticals(), regions=None),
+                             custom_feed_specs())
+    NewsMonitor(rss_feeds=feeds).run()
 
 
 def job_youtube():
@@ -104,6 +134,18 @@ def job_wikipedia():
 
 def job_twitter():
     TwitterWatcher(enabled=TWITTER_ENABLED).run()
+
+
+def job_moments():
+    # the proactive layer: calendar moments entering their planning window.
+    # Idempotent (dedup per occurrence), so running twice a day is free.
+    MomentsWatcher().run()
+
+
+def job_instagram():
+    # auto-enabled only when IG_GRAPH_TOKEN is set; pulls your own/benchmark
+    # business account via the official Graph API as visual inspiration refs.
+    InstagramWatcher().run()
 
 
 def job_telegram():
@@ -270,11 +312,14 @@ JOBS = [
     ("crowd", job_crowd, settings.poll_crowd_min),
     ("learn", job_learn, settings.poll_learn_min),
     ("backup", job_backup, 24 * 60),
+    ("moments", job_moments, 12 * 60),
 ]
 if settings.telegram_bot_token and settings.telegram_chat_id:
     JOBS.append(("telegram", job_telegram, settings.poll_telegram_min))
 if TWITTER_ENABLED:
     JOBS.append(("twitter", job_twitter, settings.poll_news_min))
+if os.getenv("IG_GRAPH_TOKEN", "").strip():
+    JOBS.append(("instagram", job_instagram, settings.poll_news_min))
 
 
 # --------------------------------------------------------------------------- #

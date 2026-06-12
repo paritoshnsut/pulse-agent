@@ -113,6 +113,107 @@ SOURCES: dict[str, dict[str, list[tuple[str, str]]]] = {
             ("BBC — Entertainment & Arts", "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"),
         ],
     },
+    # ----------------------------------------------------------- BUSINESS
+    # General business / startup / company news. The default lane for most
+    # brands: what's happening in their world that they can comment on.
+    "business": {
+        "india": [
+            ("YourStory", "https://yourstory.com/feed"),
+            ("Inc42", "https://inc42.com/feed/"),
+            ("Business Standard — Companies", "https://www.business-standard.com/rss/companies-101.rss"),
+            ("Livemint — Companies", "https://www.livemint.com/rss/companies"),
+        ],
+        "us": [
+            ("Inc.com", "https://www.inc.com/rss"),
+            ("Entrepreneur", "https://www.entrepreneur.com/latest.rss"),
+            ("Fast Company", "https://www.fastcompany.com/latest/rss"),
+            ("CNBC — Business", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147"),
+        ],
+        "global": [
+            ("Harvard Business Review", "https://hbr.org/feed"),
+        ],
+    },
+    # --------------------------------------------------------------- TECH
+    # Product / startup / dev signal — the lane for SaaS founders and tech
+    # brands. Includes Hacker News + Product Hunt, the two best keyless feeds
+    # for "what's launching / what's hot" right now.
+    "tech": {
+        "us": [
+            ("TechCrunch", "https://techcrunch.com/feed/"),
+            ("The Verge", "https://www.theverge.com/rss/index.xml"),
+            ("Ars Technica", "https://feeds.arstechnica.com/arstechnica/index"),
+            ("VentureBeat", "https://venturebeat.com/feed/"),
+            ("Engadget", "https://www.engadget.com/rss.xml"),
+        ],
+        "global": [
+            ("Hacker News — Front Page", "https://hnrss.org/frontpage"),
+            ("Product Hunt", "https://www.producthunt.com/feed"),
+        ],
+    },
+    # ---------------------------------------------------------- MARKETING
+    # The brand's professional conversation: what marketers/social teams are
+    # talking about. Lets a brand ride a marketing-industry moment (a platform
+    # change, a viral campaign, an algorithm shift) — its true native news.
+    # Also the CRAFT lane: which campaigns are winning (Ad Age / The Drum) —
+    # creative inspiration the generator can reference.
+    "marketing": {
+        "india": [
+            ("ET BrandEquity", "https://brandequity.economictimes.indiatimes.com/rss/topstories"),
+        ],
+        "global": [
+            ("Social Media Today", "https://www.socialmediatoday.com/feeds/news/"),
+            ("Marketing Dive", "https://www.marketingdive.com/feeds/news/"),
+            ("Search Engine Journal", "https://www.searchenginejournal.com/feed/"),
+            ("Adweek", "https://www.adweek.com/feed/"),
+            ("Ad Age", "https://adage.com/rss.xml"),
+            ("The Drum", "https://www.thedrum.com/rss.xml"),
+            ("Marketing Brew", "https://www.marketingbrew.com/feed"),
+            ("HubSpot — Marketing", "https://blog.hubspot.com/marketing/rss.xml"),
+            ("Content Marketing Institute", "https://contentmarketinginstitute.com/feed/"),
+        ],
+    },
+    # ------------------------------------------------------------ CULTURE
+    # Internet/youth culture — memes, drops, aesthetics, fandoms. This is the
+    # lane brands actually ride (vs hard news, which brand-safety suppresses):
+    # a meme format peaking, a collab dropping, a fandom moment. Distinct from
+    # "lifestyle" (consumer-industry news) on purpose.
+    "culture": {
+        "india": [
+            ("Homegrown", "https://homegrown.co.in/feed"),
+        ],
+        "us": [
+            ("Know Your Meme", "https://knowyourmeme.com/newsfeed.rss"),
+            ("Polygon", "https://www.polygon.com/rss/index.xml"),
+            ("IGN", "https://feeds.feedburner.com/ign/all"),
+            ("BuzzFeed", "https://www.buzzfeed.com/index.xml"),
+            ("Highsnobiety", "https://www.highsnobiety.com/feed/"),
+            ("Dazed", "https://www.dazeddigital.com/rss"),
+        ],
+    },
+    # --------------------------------------------------------- LIFESTYLE
+    # Consumer culture / trend-spotting for D2C, retail, fashion, food brands.
+    # This is where a brand catches a cultural wave it can safely surf (vs.
+    # hard news, which the brand-safety multiplier suppresses for brands).
+    "lifestyle": {
+        "us": [
+            ("Mashable", "https://mashable.com/feeds/rss/all"),
+            ("Hypebeast", "https://hypebeast.com/feed"),
+            ("Glossy", "https://www.glossy.co/feed/"),
+            ("Retail Dive", "https://www.retaildive.com/feeds/news/"),
+            ("Vox", "https://www.vox.com/rss/index.xml"),
+        ],
+    },
+    # ----------------------------------------------------------- WELLNESS
+    # Health, fitness, nutrition, wellness — for fitness/wellness brands and
+    # creators. Mostly evergreen-adjacent, science-vs-myth fodder.
+    "wellness": {
+        "us": [
+            ("Well+Good", "https://www.wellandgood.com/feed/"),
+            ("mindbodygreen", "https://www.mindbodygreen.com/rss"),
+            ("Healthline — Health News", "https://www.healthline.com/rss/health-news"),
+            ("Self", "https://www.self.com/feed/rss"),
+        ],
+    },
 }
 
 VERTICALS = tuple(SOURCES.keys())

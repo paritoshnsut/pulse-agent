@@ -31,8 +31,10 @@ PRESETS: dict[str, dict] = {
         "niche": "B2B SaaS founder sharing build-in-public lessons, product "
                  "updates, and sharp takes on our category",
         "topics": ["saas", "startups", "product", "b2b marketing", "our category"],
-        "verticals": ["business"],
-        "watch": [("subreddit", "SaaS"), ("subreddit", "startups")],
+        "verticals": ["tech", "business", "marketing"],
+        "watch": [("subreddit", "SaaS"), ("subreddit", "startups"),
+                  ("subreddit", "Entrepreneur"), ("subreddit", "technology"),
+                  ("subreddit", "OutOfTheLoop")],
     },
     "dtc_ecommerce": {
         "visual": {"accent_color": "#f97316", "bg_style": "light", "font_family": "sans"},
@@ -41,8 +43,9 @@ PRESETS: dict[str, dict] = {
         "niche": "direct-to-consumer brand with a distinct point of view on our "
                  "category, customers, and product drops",
         "topics": ["our product category", "customer stories", "launches", "lifestyle"],
-        "verticals": ["business"],
-        "watch": [("subreddit", "ecommerce")],
+        "verticals": ["lifestyle", "culture", "business", "marketing"],
+        "watch": [("subreddit", "ecommerce"), ("subreddit", "Entrepreneur"),
+                  ("subreddit", "marketing"), ("subreddit", "OutOfTheLoop")],
     },
     "creator": {
         "visual": {"accent_color": "#a855f7", "bg_style": "gradient", "font_family": "sans"},
@@ -51,8 +54,9 @@ PRESETS: dict[str, dict] = {
         "niche": "creator building an audience around a clear niche, mixing "
                  "personal story, how-to value, and strong opinions",
         "topics": ["my niche", "audience growth", "behind the scenes", "lessons"],
-        "verticals": [],
-        "watch": [],
+        "verticals": ["marketing", "lifestyle", "culture"],
+        "watch": [("subreddit", "marketing"), ("subreddit", "socialmedia"),
+                  ("subreddit", "OutOfTheLoop")],
     },
     "finance_creator": {
         "visual": {"accent_color": "#10b981", "bg_style": "dark", "font_family": "mono"},
@@ -62,7 +66,8 @@ PRESETS: dict[str, dict] = {
                  "data-led, allergic to hype",
         "topics": ["markets", "investing", "personal finance", "macro"],
         "verticals": ["finance"],
-        "watch": [("subreddit", "investing"), ("subreddit", "stocks")],
+        "watch": [("subreddit", "investing"), ("subreddit", "stocks"),
+                  ("subreddit", "personalfinance")],
     },
     "fitness_wellness": {
         "visual": {"accent_color": "#22c55e", "bg_style": "light", "font_family": "sans"},
@@ -71,8 +76,9 @@ PRESETS: dict[str, dict] = {
         "niche": "fitness & wellness brand sharing science-backed advice, myth-"
                  "busting, and our product where it genuinely helps",
         "topics": ["training", "nutrition", "recovery", "wellness myths"],
-        "verticals": [],
-        "watch": [("subreddit", "fitness")],
+        "verticals": ["wellness"],
+        "watch": [("subreddit", "fitness"), ("subreddit", "nutrition"),
+                  ("subreddit", "loseit")],
     },
     "local_business": {
         "visual": {"accent_color": "#0ea5e9", "bg_style": "light", "font_family": "sans"},
@@ -81,8 +87,8 @@ PRESETS: dict[str, dict] = {
         "niche": "local business building community presence — offers, behind-"
                  "the-scenes, neighbourhood stories, customer love",
         "topics": ["our offerings", "community", "customer stories", "local events"],
-        "verticals": [],
-        "watch": [],
+        "verticals": ["business", "marketing"],
+        "watch": [("subreddit", "smallbusiness"), ("subreddit", "marketing")],
     },
     "agency": {
         "visual": {"accent_color": "#6366f1", "bg_style": "dark", "font_family": "sans"},

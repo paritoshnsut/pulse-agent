@@ -337,6 +337,15 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
 
     r = renderer or SatoriRenderer()
 
+    if template == "hero_card":
+        # the V2 design agent (imagery underneath, Satori text on top);
+        # falls through to a flat card when no backend/refs are available
+        from pipeline import design
+        hero = design.generate_hero(post_id, db_path=db_path, renderer=r)
+        if hero:
+            return hero
+        template = None
+
     if template is None and (post.get("format") or "") in CAROUSEL_FORMATS:
         cover = generate_carousel(post, account, kit, r, db_path=db_path)
         if cover:

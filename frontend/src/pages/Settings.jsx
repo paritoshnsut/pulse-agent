@@ -28,6 +28,7 @@ export default function Settings({ accounts, refreshAccounts }) {
   const [w, setW] = useState({ kind: 'youtube_channel', ref: '', label: '' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
 
@@ -132,6 +133,21 @@ export default function Settings({ accounts, refreshAccounts }) {
       setMsg(`Voice retrained on ${r.trained_on} of your posts` +
         (r.inspiration_used ? ` + ${r.inspiration_used} inspiration pieces` : '') +
         ' ✓ — drafts pick this up immediately.');
+      refreshAccounts(); refreshCorpus();
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
+
+  const importVoice = async () => {
+    if (!voiceFor || !importUrl.trim()) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await api(`/api/accounts/${voiceFor}/import-voice`,
+        { method: 'POST', body: { url: importUrl.trim(), kind } });
+      setMsg(`Imported ${r.imported} post(s) from ${r.feed}` +
+        (r.duplicates ? ` (${r.duplicates} already known)` : '') +
+        (r.trained ? ` — voice trained on ${r.trained_on} ✓` : '') +
+        (r.niche ? ` — topics detected: ${r.niche}` : ''));
+      setImportUrl('');
       refreshAccounts(); refreshCorpus();
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
@@ -325,6 +341,24 @@ export default function Settings({ accounts, refreshAccounts }) {
           <Btn color="green" disabled={!voiceFor || busy} onClick={retrain}>
             {busy ? 'analyzing the voice…' : 'Retrain voice from corpus'}
           </Btn>
+        </div>
+        <div className="mt-4 border-t border-zinc-800 pt-3">
+          <div className="text-sm font-medium mb-1">⚡ Or import everything from one URL</div>
+          <div className="text-xs text-zinc-500 mb-2">
+            Paste your blog / Substack / Medium / newsletter URL. We find the
+            feed, pull your posts into the corpus, train the voice, and fill in
+            your topics — automatically. (X/LinkedIn can't be read without paid
+            APIs — paste those posts above.)
+          </div>
+          <div className="flex gap-2 items-center">
+            <Input placeholder="https://yourname.substack.com" value={importUrl}
+                   onInput={(e) => setImportUrl(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && importVoice()} />
+            <Btn color="green" disabled={!voiceFor || !importUrl.trim() || busy}
+                 onClick={importVoice}>
+              {busy ? 'importing…' : 'Import & train'}
+            </Btn>
+          </div>
         </div>
       </Card>
 

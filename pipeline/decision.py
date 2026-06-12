@@ -65,8 +65,12 @@ SYSTEM_PROMPT = (
     "goals, and stated positions. A commentator reacts to news; a brand posts "
     "about what's relevant to its product and audience — judge by fit to the "
     "account, not by newsworthiness in the abstract. You are decisive and do "
-    "not inflate scores: most items are a SKIP. Respond with ONLY a JSON "
-    "object, no prose, no markdown fences."
+    "not inflate scores: most items are a SKIP. You also judge BRAND SAFETY: "
+    "whether an account that sells something could post about this item without "
+    "looking tone-deaf, opportunistic, or offensive — a tragedy, disaster, "
+    "death, violence, or a polarizing political fight is brand-unsafe even when "
+    "it is highly newsworthy. Respond with ONLY a JSON object, no prose, no "
+    "markdown fences."
 )
 
 
@@ -163,6 +167,28 @@ def memory_leverage_score(article: dict, account_id: int,
         return 0.0
 
 
+def brand_safety_multiplier(safety: float, kind: Optional[str]) -> float:
+    """0.x-1.0 multiplier on the composite, gated by account `kind`.
+
+    A commentator reacting to a tragedy is doing its job; a brand riding the
+    same tragedy is a PR disaster. So we scale the SAME safety judgment by how
+    much this kind of account cares:
+        strength 0.0 (commentator) -> always 1.0 (feature invisible to politics)
+        strength 1.0 (brand)       -> full suppression
+        strength 0.5 (creator)     -> half
+    raw maps the safety score onto [floor, 1.0]: at/above `safe_score` it's 1.0;
+    a true tragedy (safety 0) bottoms out at the floor. Failure-safe to 1.0."""
+    if not settings.brand_safety_enabled:
+        return 1.0
+    strength = settings.brand_safety_strength.get((kind or "").lower(), 0.0)
+    if strength <= 0:
+        return 1.0
+    safe = max(settings.brand_safety_safe_score, 0.1)
+    floor = settings.brand_safety_floor
+    raw = floor + (1.0 - floor) * min(max(safety, 0.0), safe) / safe
+    return round(1.0 - strength * (1.0 - raw), 4)
+
+
 class DecisionAgent:
     """Scores articles for a given account. The Anthropic client is injectable
     so the scoring math can be unit-tested without a key or network."""
@@ -228,6 +254,14 @@ class DecisionAgent:
             'number exists; "quote_context" only if there is a striking verbatim '
             'quote; "achievement" only if the story is a clear win for a cause '
             'this account openly backs; "hot_take" when in doubt,\n'
+            '  "brand_safety": 0-10 — could a brand/business that SELLS something '
+            "post about this without looking tone-deaf, opportunistic, or "
+            "offensive? 10 = totally safe (product, lifestyle, positive culture, "
+            "light news); 5 = touchy, handle with care; 0 = a tragedy, disaster, "
+            "death, violence, or a polarizing political fight no brand should ride. "
+            "Judge the TOPIC's safety, independent of whether it is newsworthy,\n"
+            '  "sensitivity": one short label for why — one of "safe", "sensitive", '
+            '"tragedy", "divisive", "controversy",\n'
             '  "reasoning": one or two sentences justifying the scores.\n'
             "Be stingy: a generic headline with no special angle for this account "
             "should score low on reaction_potential even if relevant."
@@ -250,12 +284,16 @@ class DecisionAgent:
             logger.error("Could not parse model JSON; defaulting to neutral. Raw: %s", text[:200])
             data = {}
         fmt = (data.get("format") or "").strip()
+        # brand_safety defaults to the safe score (fail open): an unparseable
+        # judgment must never silently suppress an item — guards flag, never block.
         return {
             "relevance": _clamp(float(data.get("relevance", 5.0))),
             "reaction_potential": _clamp(float(data.get("reaction_potential", 5.0))),
             "angle": (data.get("angle") or "").strip(),
             "topic": (data.get("topic") or "").strip().lower().replace(" ", "-"),
             "format": fmt if fmt in CHOOSABLE_FORMATS else "hot_take",
+            "brand_safety": _clamp(float(data.get("brand_safety", settings.brand_safety_safe_score))),
+            "sensitivity": (data.get("sensitivity") or "").strip().lower(),
             "reasoning": (data.get("reasoning") or "").strip(),
         }
 
@@ -323,7 +361,10 @@ class DecisionAgent:
                 freshness = 1.0
         from sources import source_weight_for
         src_weight = source_weight_for(article)
-        score = round(self.composite(subscores) * freshness * src_weight, 3)
+        # third multiplier: a brand riding a tragedy is a PR disaster; gated by
+        # `kind` so a commentator is never suppressed for reacting to hard news.
+        bs_mult = brand_safety_multiplier(judged["brand_safety"], account.get("kind"))
+        score = round(self.composite(subscores) * freshness * src_weight * bs_mult, 3)
         return {
             "article_id": article.get("id"),
             "account_id": account.get("id"),
@@ -337,6 +378,9 @@ class DecisionAgent:
             "velocity_is_real": hint is not None,
             "freshness_mult": freshness,
             "source_weight": src_weight,
+            "brand_safety": judged["brand_safety"],
+            "sensitivity": judged["sensitivity"],
+            "brand_safety_mult": bs_mult,
         }
 
     def _is_stale(self, article: dict, now: datetime) -> bool:

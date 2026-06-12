@@ -69,30 +69,28 @@ brain; visuals are the multiplier.
 | **Font architecture note:** fontsource browser subsets DON'T work with Satori (no same-family multi-file fallback → ₹ tofu). Fixed: `merge_fonts.py` builds single merged ttf per family/weight (committed in `render/fonts/`), and every stack ends in Noto Sans for cross-family glyph fallback. | ✅ |
 | More templates: announcement card, list/tips card, before-after | ⏳ |
 
-## Phase V2 — the AI-imagery design agent (planned, not started)
+## Phase V2 — the AI-imagery design agent (V2a SHIPPED)
 
 The user-insight this encodes: human designers already work as
 *find-inspiration → prompt an image model → iterate → finish typography in
 Canva*. We automate that loop, with one reframe — **the "Canva finish" IS
 Satori** (deterministic typography/brand layer), so the agent only owns the
-imagery underneath:
+imagery underneath. Lives in `pipeline/design.py` + the `hero_card` template.
 
-1. Image-gen backend behind an interface (Flux / Ideogram / SDXL / DALL·E)
-   + per-day cost guardrails (these are paid calls; the iterate loop
-   multiplies them).
-2. Prompt construction from brand kit + content + curated inspiration refs.
-3. **Generate → Claude-vision critique → regenerate-with-feedback** loop —
-   the same shape as our persona-gate loop, with vision as the judge
-   ("composition unbalanced, palette off-brand; emphasize X").
-4. **Composite: AI background/hero + Satori text/logo layer on top.** Gets
-   "designed" richness without AI's spelling/layout failures — the genuine
-   quality edge over flat-HTML tools.
-5. Visual preference profile learned from approvals (Genome-A-for-visuals).
-6. Cheaper no-paid-API path: brand uploads approved background images/
-   textures; the agent selects + treats them per post.
-
-Trigger to start V2: V1 visuals are being used on real posts and text-only
-cards feel limiting; budget exists for paid image generation.
+| Item | Status |
+|---|---|
+| Image-gen backend behind an interface: keyless **library** backend (default — picks the best approved background from `visual_refs` by tag/notes match) + paid **openai** backend (gpt-image-1, `VISUALS_IMAGEGEN=openai`) | ✅ |
+| Per-day cost guardrail: `VISUALS_IMAGE_DAILY_CAP` (default 12) counted from the data itself (`generated_images_today`); over cap → falls back to library | ✅ |
+| Every paid generation persisted as a `kind='generated'` visual_ref — reusable for free forever | ✅ |
+| Prompt construction from brand kit (colors/bg mood/notes) + post subject + account niche, with a hard NO-TEXT instruction (typography is Satori's) | ✅ |
+| **Generate → Claude-vision critique → regenerate-with-feedback** loop, bounded by `DESIGN_MAX_ITERS` (2) / `DESIGN_ACCEPT_SCORE` (7.0); fail-open judge; library picks skip critique (a human approved them) | ✅ |
+| **Composite**: `hero_card` Satori template — image layer (or gradient fallback) + darkening scrim + auto-fit headline + brand footer on top | ✅ |
+| Keyless path: upload approved backgrounds via `POST /api/accounts/{id}/refs` (file or URL, tags/notes); list/delete endpoints | ✅ |
+| Wired into the existing swap-template control: `template=hero_card` on `/api/drafts/{id}/visual`; no backend/refs → degrades to the flat card | ✅ |
+| Fully fail-safe: no refs, dead API, broken critique, render failure → flat card, never an error | ✅ |
+| Visual preference profile learned from approvals (Genome-A-for-visuals) | ⏳ V2b |
+| Instagram inspiration feed → automatic ref suggestions | ⏳ V2b (upstream shape built: `watch/instagram.py` intent:"inspiration") |
+| Alternate image models (Flux / Ideogram / SDXL) behind the same interface | ⏳ when needed |
 
 ## Deferred / refused
 
