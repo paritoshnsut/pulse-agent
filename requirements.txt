@@ -1,4 +1,9 @@
 anthropic>=0.40.0
+# --- optional transcription backends (install whichever you use) ---
+# assemblyai>=0.30.0      # TRANSCRIPTION_BACKEND=assemblyai (100 hrs/month free)
+# openai>=1.0.0           # TRANSCRIPTION_BACKEND=openai     (paid, whisper-large-v3)
+# faster-whisper>=1.0.0   # TRANSCRIPTION_BACKEND=local      (on-device, needs ffmpeg)
+# yt-dlp>=2024.0.0        # needed by local + openai backends to download audio
 feedparser>=6.0.11
 requests>=2.31.0
 python-dotenv>=1.0.1

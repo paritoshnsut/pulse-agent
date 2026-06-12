@@ -52,29 +52,10 @@ def video_id_from_url(url: str) -> Optional[str]:
 
 
 def fetch_transcript(video_url: str) -> Optional[str]:
-    """YouTube's own captions for a video, joined to plain text, or None.
-    Lazy-imports youtube-transcript-api so the watcher (and tests) work
-    without it; any failure means 'no transcript', never an error upward."""
-    vid = video_id_from_url(video_url)
-    if not vid:
-        return None
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-
-        try:  # classic API (<=0.6)
-            segments = YouTubeTranscriptApi.get_transcript(vid, languages=list(TRANSCRIPT_LANGS))
-            texts = [s.get("text", "") for s in segments]
-        except AttributeError:  # 1.x API
-            fetched = YouTubeTranscriptApi().fetch(vid, languages=list(TRANSCRIPT_LANGS))
-            texts = [getattr(s, "text", "") for s in fetched]
-        text = " ".join(t.strip() for t in texts if t and t.strip())
-        return text[:TRANSCRIPT_MAX_CHARS] or None
-    except ImportError:
-        logger.info("youtube-transcript-api not installed — skipping transcript.")
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.info("No transcript for %s: %s", vid, exc)
-        return None
+    """Transcribe a YouTube video. Delegates to watch.transcribe which routes
+    to the configured backend (captions → AssemblyAI → OpenAI → local)."""
+    from watch.transcribe import transcribe_url
+    return transcribe_url(video_url)
 
 
 def _to_iso(struct_time) -> Optional[str]:

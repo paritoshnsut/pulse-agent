@@ -135,6 +135,16 @@ class Settings:
     # Per-process cap on how many articles the scorer drains per cycle (cost guard).
     process_batch: int = int(os.getenv("PROCESS_BATCH", "40"))
 
+    # --- Transcription backend (audio/video → text).
+    # youtube_captions: free, keyless, YouTube only (default).
+    # assemblyai:       100 hrs/month free. Needs ASSEMBLYAI_API_KEY.
+    # openai:           Whisper API, $0.006/min. Needs OPENAI_API_KEY.
+    # local:            faster-whisper on-device. Needs ≥1GB free RAM + ffmpeg.
+    transcription_backend: str = os.getenv("TRANSCRIPTION_BACKEND", "youtube_captions")
+    assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    whisper_model: str = os.getenv("WHISPER_MODEL", "small")  # tiny/base/small/medium
+
     # --- Reddit OAuth (script-type app; lifts Railway datacenter 403s).
     # Create at reddit.com/prefs/apps → script. Without these, the watcher
     # falls back to keyless (works locally, blocked on Railway). ---
