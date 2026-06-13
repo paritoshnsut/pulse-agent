@@ -35,6 +35,8 @@ const FONTS = [
   font("Inter-700.ttf", "Inter", 700),
   font("Lora-400.ttf", "Lora", 400),
   font("Lora-700.ttf", "Lora", 700),
+  font("PlayfairDisplay-400.ttf", "Playfair Display", 400),
+  font("PlayfairDisplay-700.ttf", "Playfair Display", 700),
   font("JetBrainsMono-400.ttf", "JetBrains Mono", 400),
   font("JetBrainsMono-700.ttf", "JetBrains Mono", 700),
   font("NotoSans-400.ttf", "Noto Sans", 400),

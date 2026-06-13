@@ -31,6 +31,7 @@ FAMILIES = {
     "lora": "Lora",
     "jetbrains-mono": "JetBrainsMono",
     "noto-sans": "NotoSans",
+    "playfair-display": "PlayfairDisplay",  # editorial display headline face
 }
 
 

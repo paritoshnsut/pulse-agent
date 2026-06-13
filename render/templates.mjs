@@ -18,6 +18,12 @@
 import { SIZE, SQUARE, theme, el, accentBar, footer, frame,
          fitFontSize } from "./ui.mjs";
 import { decorLayer, iconNode } from "./icons.mjs";
+
+// Editorial type system (review-driven): Playfair Display for the big display
+// headline (magazine authority), Inter for tags/subheads/meta (clean, modern).
+// Noto Sans closes each stack so ₹ and friends never tofu.
+const DISPLAY = "Playfair Display, Noto Sans";
+const SANS = "Inter, Noto Sans";
 import { artLayers } from "./art.mjs";
 import { chartNode } from "./charts.mjs";
 import { BLUEPRINT_TEMPLATES } from "./blueprints.mjs";
@@ -266,11 +272,23 @@ export function carouselCta(data, brand) {
 // An editorial pill (the "NEW ENVOY" / "US → INDIA" tag): accent fill, dark
 // text, uppercase. Falls back to a plain accent overline when used as a kicker.
 function pill(t, label) {
-  return el("div", {
-    display: "flex", alignSelf: "flex-start", background: t.accent,
-    color: "#0b0d12", fontSize: 24, fontWeight: 800, letterSpacing: 1,
-    textTransform: "uppercase", padding: "8px 16px", borderRadius: 8,
-  }, label);
+  const base = {
+    display: "flex", alignItems: "center", gap: 10, alignSelf: "flex-start",
+    background: t.accent, color: "#0b0d12", fontFamily: SANS, fontSize: 24,
+    fontWeight: 700, letterSpacing: 1, textTransform: "uppercase",
+    padding: "8px 16px", borderRadius: 8,
+  };
+  // an arrow tag ("US → DELHI") renders the arrow as SVG — the merged font
+  // subsets lack U+2192, so a literal arrow would tofu.
+  const parts = label.split(/\s*[→➜⟶➝➔]\s*/);
+  if (parts.length === 2) {
+    return el("div", base, [
+      el("div", { display: "flex" }, parts[0]),
+      iconNode("arrow_right", 22, "#0b0d12", 1, 2.6),
+      el("div", { display: "flex" }, parts[1]),
+    ]);
+  }
+  return el("div", base, label);
 }
 
 // Headline with one phrase colour-popped (Rule 3). Rendered as wrapping word
@@ -293,8 +311,8 @@ function highlightedHeadline(text, highlight, t, fontSize) {
     display: "flex", flexWrap: "wrap",
     columnGap: Math.round(fontSize * 0.27), rowGap: Math.round(fontSize * 0.1),
   }, words.map((w, i) => el("div", {
-    display: "flex", fontSize, fontWeight: 800, lineHeight: 1.1,
-    color: marked.has(i) ? t.accent : t.fg,
+    display: "flex", fontFamily: DISPLAY, fontSize, fontWeight: 700,
+    lineHeight: 1.04, color: marked.has(i) ? t.accent : t.fg,
     textShadow: "0 2px 14px rgba(0,0,0,0.5)",
   }, w)));
 }
@@ -346,8 +364,8 @@ export function heroPortrait(data, brand, dims = SIZE) {
       el("div", { display: "flex", marginTop: 22 },
         [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 70, 36))]),
       sub
-        ? el("div", { fontSize: 30, color: t.muted, lineHeight: 1.3,
-            marginTop: 18, display: "flex" }, sub)
+        ? el("div", { fontFamily: SANS, fontSize: 30, color: t.muted,
+            lineHeight: 1.3, marginTop: 18, display: "flex" }, sub)
         : el("div", { display: "flex" }),
     ]),
     footer(t),
@@ -410,8 +428,8 @@ export function dualPortrait(data, brand, dims = SIZE) {
           el("div", { display: "flex", marginTop: tag ? 14 : 0 },
             [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 52, 30))]),
           sub
-            ? el("div", { fontSize: 28, color: t.muted, lineHeight: 1.3,
-                marginTop: 14, display: "flex" }, sub)
+            ? el("div", { fontFamily: SANS, fontSize: 28, color: t.muted,
+                lineHeight: 1.3, marginTop: 14, display: "flex" }, sub)
             : el("div", { display: "flex" }),
         ]),
         footer(t),

@@ -12,6 +12,7 @@
     "@fontsource/jetbrains-mono": "^5.0.0",
     "@fontsource/lora": "^5.0.0",
     "@fontsource/noto-sans": "^5.2.10",
+    "@fontsource/playfair-display": "^5.2.8",
     "@resvg/resvg-js": "^2.6.0",
     "satori": "^0.12.0"
   }
