@@ -568,7 +568,7 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         auto_ok = (template is None and not (PORTRAIT_TEMPLATES & shunned)
                    and (looks_entity_rich(content) or has_number))
         if explicit_img or auto_ok:
-            from pipeline.assets import resolve_portrait
+            from pipeline.assets import resolve_portrait, resolve_symbol
             brief = VisualEntityExtractor().brief_for(post, db_path=db_path) or {}
             # surface the brief on the in-memory post so brand_payload's Rule-9
             # palette (content_story) applies on this render — even if we fall
@@ -602,9 +602,17 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             elif template != "big_number" and strat == "image_portrait" and subjects:
                 a = resolve_portrait(subjects[0]["name"])
                 if a:
+                    # background storytelling: the first licensed contextual
+                    # scene that resolves (Capitol, flag, …); None → plain panel.
+                    backdrop = None
+                    for sym in brief.get("symbols", []):
+                        backdrop = resolve_symbol(sym)
+                        if backdrop:
+                            break
                     out = _render_image("hero_portrait", {
                         "text": head, "highlight": highlight, "subheadline": sub,
-                        "tag": tag, "overline": kicker, "image": a})
+                        "tag": tag, "overline": kicker, "image": a,
+                        "backdrop": backdrop})
             # BIG NUMBER card (Rule 7): one number IS the story. Explicit ask, or
             # auto for money/data/achievement/sports when a number dominates and
             # no portrait fit. The number is the hero; the headline is its label.

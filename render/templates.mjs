@@ -334,6 +334,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
   const sub = (data.subheadline || "").trim();
   const tag = (data.tag || "").trim();
   const overline = (data.overline || "").trim();
+  const backdrop = data.backdrop || null;  // {src, credit} — contextual scene
   const imgW = img ? Math.round(dims.width * 0.44) : 0;
   const textW = dims.width - imgW;
 
@@ -371,12 +372,30 @@ export function heroPortrait(data, brand, dims = SIZE) {
     footer(t),
   ]);
 
+  // background storytelling: a faint, legally-licensed contextual scene (a
+  // landmark/flag) behind the text, under a legibility scrim. The portrait
+  // (opaque) covers it on the right; the scrim keeps the headline readable.
+  const layers = [];
+  if (backdrop && backdrop.src) {
+    layers.push({ type: "img", props: { src: backdrop.src,
+      width: dims.width, height: dims.height,
+      style: { position: "absolute", top: 0, left: 0, width: dims.width,
+        height: dims.height, objectFit: "cover", opacity: 0.28 } } });
+    layers.push(el("div", { position: "absolute", top: 0, left: 0,
+      width: dims.width, height: dims.height,
+      background: "linear-gradient(90deg, rgba(8,10,14,0.86) 0%, "
+        + "rgba(8,10,14,0.55) 46%, rgba(8,10,14,0.12) 100%)" }));
+  }
+  layers.push(el("div", { display: "flex", width: dims.width, height: dims.height },
+    imgCol ? [textCol, imgCol] : [textCol]));
+  layers.push(vignette(dims));
+  if (backdrop && backdrop.credit) {
+    layers.push(el("div", { position: "absolute", bottom: 14, right: 18,
+      fontFamily: SANS, fontSize: 16, color: "rgba(245,247,250,0.5)",
+      display: "flex" }, backdrop.credit));
+  }
   return el("div", { width: dims.width, height: dims.height, display: "flex",
-    position: "relative", background: t.background, fontFamily: t.font }, [
-    el("div", { display: "flex", width: dims.width, height: dims.height },
-      imgCol ? [textCol, imgCol] : [textCol]),
-    vignette(dims),
-  ]);
+    position: "relative", background: t.background, fontFamily: t.font }, layers);
 }
 
 export function dualPortrait(data, brand, dims = SIZE) {

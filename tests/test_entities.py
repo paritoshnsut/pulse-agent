@@ -115,7 +115,7 @@ def test_typographic_verdict_is_cached(temp_db):
         memory.get_post(pid, db_path=temp_db), db_path=temp_db)
     expected = {"entities": [], "visual_strategy": "typography",
                 "story_type": "", "headline": "", "highlight": "",
-                "subheadline": "", "tag": "", "big_number": ""}
+                "subheadline": "", "tag": "", "big_number": "", "symbols": []}
     assert brief == expected
     stored = memory.get_post(pid, db_path=temp_db)["meta_json"]["visual_entities"]
     assert stored == expected

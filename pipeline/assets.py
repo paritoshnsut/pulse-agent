@@ -34,6 +34,14 @@ _MAX_DIM = 1000  # cap the portrait so the base64 data-URL stays render-friendly
 # name(lowercased) -> asset dict or None. None is a real (negative) answer for a
 # 404 page; transient failures return None WITHOUT caching so they retry.
 _CACHE: dict[str, Optional[dict]] = {}
+_SYMBOL_CACHE: dict[str, Optional[dict]] = {}
+
+# Wikimedia Commons search → a CC/PD-licensed concept image (Capitol, flag, a
+# parliament building) for the storytelling backdrop. Only licenses that permit
+# reuse; the credit string is carried so CC-BY attribution can be shown.
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+_OK_LICENSE = ("public domain", "cc0", "cc-by", "cc by", "attribution",
+               "no restrictions")
 
 
 def _to_asset(raw: bytes) -> Optional[dict]:
@@ -94,4 +102,61 @@ def resolve_portrait(name: str, lang: str = "en", timeout: int = 8) -> Optional[
         logger.debug("portrait fetch failed for '%s': %s", name, exc)
         return None                     # transient: do NOT cache, retry later
     _CACHE[key] = asset
+    return asset
+
+
+def _strip_html(s: str) -> str:
+    import re
+    return re.sub(r"<[^>]+>", "", s or "").strip()
+
+
+def resolve_symbol(query: str, timeout: int = 8) -> Optional[dict]:
+    """A concept ("US Capitol", "Indian flag", "parliament building") → a
+    CC/PD-licensed Commons image as {src, width, height, credit}, or None.
+
+    This is the LEGAL background path: Commons images carry an explicit license,
+    so (unlike a Google-Images press photo) reuse is permitted; CC-BY ones get a
+    credit string the card can show. Filtered to reuse-permitting licenses and
+    raster formats Pillow can read. Per-query cached (negative results too)."""
+    key = (query or "").strip().lower()
+    if not key:
+        return None
+    if key in _SYMBOL_CACHE:
+        return _SYMBOL_CACHE[key]
+    asset = None
+    try:
+        resp = requests.get(COMMONS_API, headers={"User-Agent": USER_AGENT},
+                            timeout=timeout, params={
+                                "action": "query", "format": "json",
+                                "generator": "search", "gsrnamespace": 6,
+                                "gsrsearch": query, "gsrlimit": 8,
+                                "prop": "imageinfo", "iiprop": "url|mime|extmetadata",
+                                "iiurlwidth": 1200})
+        resp.raise_for_status()
+        pages = (resp.json().get("query") or {}).get("pages") or {}
+        for page in pages.values():
+            info = (page.get("imageinfo") or [{}])[0]
+            mime = info.get("mime", "")
+            if mime not in ("image/jpeg", "image/png"):
+                continue
+            meta = info.get("extmetadata") or {}
+            lic = (meta.get("LicenseShortName", {}).get("value", "")
+                   or meta.get("UsageTerms", {}).get("value", "")).lower()
+            if not any(ok in lic for ok in _OK_LICENSE):
+                continue
+            url = info.get("thumburl") or info.get("url")
+            if not url:
+                continue
+            img = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+            img.raise_for_status()
+            asset = _to_asset(img.content)
+            if asset:
+                artist = _strip_html(meta.get("Artist", {}).get("value", ""))[:60]
+                short = _strip_html(meta.get("LicenseShortName", {}).get("value", ""))
+                asset["credit"] = " / ".join(filter(None, [artist, short, "Wikimedia"]))
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("symbol fetch failed for '%s': %s", query, exc)
+        return None
+    _SYMBOL_CACHE[key] = asset
     return asset
