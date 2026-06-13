@@ -422,11 +422,12 @@ export function heroPortrait(data, brand, dims = SIZE) {
       width: dims.width, height: dims.height,
       style: { position: "absolute", top: 0, left: 0, width: dims.width,
         height: dims.height, objectFit: "cover", opacity: 0.16 } } });
-    // localized tinted scrim — darkens only the text side, clears at the portrait
+    // light localized tint — just enough to seat the text; the duotone backdrop
+    // is already faint (0.16), so a heavy scrim only makes the card dull.
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: `linear-gradient(90deg, ${rgba(t.scrim, 0.70)} 0%, `
-        + `${rgba(t.scrim, 0.34)} 44%, rgba(0,0,0,0) 74%)` }));
+      background: `linear-gradient(90deg, ${rgba(t.scrim, 0.40)} 0%, `
+        + `${rgba(t.scrim, 0.14)} 46%, rgba(0,0,0,0) 76%)` }));
   }
   // a single ambient colour glow behind the subject — the only atmosphere layer
   if (img) {
@@ -437,7 +438,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
   }
   layers.push(el("div", { display: "flex", width: dims.width, height: dims.height },
     imgCol ? [textCol, imgCol] : [textCol]));
-  layers.push(vignette(dims, 0.22));
+  layers.push(vignette(dims, 0.12));
   if (backdrop && backdrop.credit) {
     layers.push(el("div", { position: "absolute", bottom: 14, right: 18,
       fontFamily: SANS, fontSize: 16, color: "rgba(245,247,250,0.5)",
