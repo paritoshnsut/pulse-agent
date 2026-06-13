@@ -110,7 +110,29 @@ def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s or "").strip()
 
 
-def resolve_symbol(query: str, width: int = 1200, timeout: int = 8) -> Optional[dict]:
+def _to_duotone_asset(raw: bytes) -> Optional[dict]:
+    """A backdrop must be ATMOSPHERE, not a recognizable pasted photo. Convert
+    to a clean monochrome duotone (grayscale → autocontrast → dark→mid map) so,
+    laid faintly over the palette gradient, it reads as a tinted silhouette the
+    brain *feels* rather than a literal jpeg it consciously parses."""
+    try:
+        from PIL import Image, ImageOps
+        img = Image.open(io.BytesIO(raw)).convert("L")
+        img = ImageOps.autocontrast(img, cutoff=2)
+        img = ImageOps.colorize(img, black="#0b0e16", white="#aab2bd")
+        if max(img.size) > _MAX_DIM:
+            img.thumbnail((_MAX_DIM, _MAX_DIM))
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=82)
+        return {"src": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
+                "width": img.width, "height": img.height}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("duotone failed: %s", exc)
+        return None
+
+
+def resolve_symbol(query: str, width: int = 1200, mono: bool = False,
+                   timeout: int = 8) -> Optional[dict]:
     """A concept ("US Capitol", "Indian flag", "parliament building") → a
     CC/PD-licensed Commons image as {src, width, height, credit}, or None.
 
@@ -122,8 +144,8 @@ def resolve_symbol(query: str, width: int = 1200, timeout: int = 8) -> Optional[
     `width` is the thumbnail width fetched — a small value (e.g. 420) yields a
     soft, slightly-blurred backdrop when the template upscales it (Satori has no
     blur filter, so downscaling is the blur)."""
-    key = f"{(query or '').strip().lower()}@{width}"
-    if not key.strip("@"):
+    key = f"{(query or '').strip().lower()}@{width}{'m' if mono else ''}"
+    if not (query or "").strip():
         return None
     if key in _SYMBOL_CACHE:
         return _SYMBOL_CACHE[key]
@@ -153,7 +175,7 @@ def resolve_symbol(query: str, width: int = 1200, timeout: int = 8) -> Optional[
                 continue
             img = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
             img.raise_for_status()
-            asset = _to_asset(img.content)
+            asset = (_to_duotone_asset if mono else _to_asset)(img.content)
             if asset:
                 artist = _strip_html(meta.get("Artist", {}).get("value", ""))[:60]
                 short = _strip_html(meta.get("LicenseShortName", {}).get("value", ""))

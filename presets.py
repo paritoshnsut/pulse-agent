@@ -16,7 +16,7 @@ from __future__ import annotations
 # Each preset: kind + niche template + topics + verticals + starter watch refs.
 PRESETS: dict[str, dict] = {
     "political_commentator": {
-        "visual": {"accent_color": "#f59e0b", "bg_style": "dark", "font_family": "serif"},
+        "visual": {"accent_color": "#f5b833", "bg_style": "dark", "font_family": "serif"},
         "label": "Political / news commentator",
         "kind": "commentator",
         "niche": "political commentary: data-backed contrarian takes on policy, governance, and the gap between what leaders say and what they do — India focus",

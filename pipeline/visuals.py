@@ -606,7 +606,9 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
                     # scene that resolves (Capitol, flag, …); None → plain panel.
                     backdrop = None
                     for sym in brief.get("symbols", []):
-                        backdrop = resolve_symbol(sym, width=440)  # small = soft
+                        # small + duotone = soft atmospheric silhouette, not a
+                        # recognizable pasted photo (art-direction note).
+                        backdrop = resolve_symbol(sym, width=440, mono=True)
                         if backdrop:
                             break
                     out = _render_image("hero_portrait", {

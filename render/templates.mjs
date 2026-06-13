@@ -313,7 +313,7 @@ function highlightedHeadline(text, highlight, t, fontSize) {
   }, words.map((w, i) => el("div", {
     display: "flex", fontFamily: DISPLAY, fontSize, fontWeight: 700,
     lineHeight: 1.04, color: marked.has(i) ? t.accent : t.fg,
-    textShadow: "0 2px 14px rgba(0,0,0,0.5)",
+    textShadow: "0 1px 6px rgba(0,0,0,0.35)",
   }, w)));
 }
 
@@ -376,8 +376,9 @@ export function heroPortrait(data, brand, dims = SIZE) {
       el("div", { display: "flex", marginTop: 22 },
         [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 70, 36))]),
       sub
-        ? el("div", { fontFamily: SANS, fontSize: 30, color: t.muted,
-            lineHeight: 1.3, marginTop: 18, display: "flex" }, sub)
+        ? el("div", { fontFamily: SANS, fontSize: 29, fontWeight: 500,
+            color: "rgba(244,246,250,0.86)", lineHeight: 1.3, marginTop: 18,
+            display: "flex", textShadow: "0 1px 8px rgba(0,0,0,0.6)" }, sub)
         : el("div", { display: "flex" }),
     ]),
     footer(t),
@@ -386,28 +387,27 @@ export function heroPortrait(data, brand, dims = SIZE) {
   // Editorial layer stack (the "≥3 layers" rule): base palette gradient (root)
   // → soft licensed contextual scene → legibility scrim → faint dot-grid
   // texture → ambient glow behind the subject → portrait → typography → vignette.
+  // Simplified stack (art direction: fewer, better-placed layers):
+  // palette gradient (root) → faint duotone silhouette → localized scrim →
+  // one ambient glow → portrait → typography → light vignette. No texture.
   const layers = [];
   if (backdrop && backdrop.src) {
     layers.push({ type: "img", props: { src: backdrop.src,
       width: dims.width, height: dims.height,
       style: { position: "absolute", top: 0, left: 0, width: dims.width,
-        height: dims.height, objectFit: "cover", opacity: 0.42 } } });
-    // LOCALIZED + TINTED scrim: darken only the text (left) side, fading to
-    // clear over the portrait. Tinted toward the palette base, never pure black,
-    // so the scene's colour survives (review: no global black overlay).
+        height: dims.height, objectFit: "cover", opacity: 0.16 } } });
+    // localized tinted scrim — darkens only the text side, clears at the portrait
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: `linear-gradient(90deg, ${rgba(t.scrim, 0.78)} 0%, `
-        + `${rgba(t.scrim, 0.42)} 42%, rgba(0,0,0,0) 72%)` }));
+      background: `linear-gradient(90deg, ${rgba(t.scrim, 0.70)} 0%, `
+        + `${rgba(t.scrim, 0.34)} 44%, rgba(0,0,0,0) 74%)` }));
   }
-  // texture (faint dot grid / motif) so the canvas isn't a flat rectangle
-  layers.push(...decorLayer(t, { style: "subtle", seed: 0 }));
-  // ambient colour glow behind the subject — separation + premium atmosphere
+  // a single ambient colour glow behind the subject — the only atmosphere layer
   if (img) {
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: `radial-gradient(42% 58% at ${textW + Math.round(imgW * 0.1)}px 44%, `
-        + `${rgba(t.accent, 0.30)}, rgba(0,0,0,0) 70%)` }));
+      background: `radial-gradient(44% 60% at ${textW + Math.round(imgW * 0.1)}px 44%, `
+        + `${rgba(t.accent, 0.26)}, rgba(0,0,0,0) 70%)` }));
   }
   layers.push(el("div", { display: "flex", width: dims.width, height: dims.height },
     imgCol ? [textCol, imgCol] : [textCol]));
