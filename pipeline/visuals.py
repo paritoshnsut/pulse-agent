@@ -197,9 +197,10 @@ def brand_payload(account: dict, kit: Optional[dict],
         "watermark_text": (kit or {}).get("watermark_text") or "",
         "handle": account.get("handle") or "",
         "logo": logo_asset((kit or {}).get("logo_url")),
-        # content-aware theming — format + dominant emotion drive the gradient
+        # content-aware theming — story type (Rule 9) > emotion > format
         "content_format": (post or {}).get("format") or "",
         "content_emotion": meta.get("dominant_emotion") or meta.get("emotion") or "",
+        "content_story": (meta.get("visual_entities") or {}).get("story_type") or "",
     }
 
 
@@ -559,6 +560,11 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         if template in PORTRAIT_TEMPLATES or auto_ok:
             from pipeline.assets import resolve_portrait
             brief = VisualEntityExtractor().brief_for(post, db_path=db_path) or {}
+            # surface the brief on the in-memory post so brand_payload's Rule-9
+            # palette (content_story) applies on this render — even if we fall
+            # through to a chart/card below.
+            if isinstance(post.get("meta_json"), dict):
+                post["meta_json"]["visual_entities"] = brief
             ents = brief.get("entities", [])
             subjects = [e for e in ents if e["role"] == "subject"
                         and e["type"] in ("person", "org")] \

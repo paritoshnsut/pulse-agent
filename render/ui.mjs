@@ -118,8 +118,36 @@ const CONTENT_THEMES = {
   },
 };
 
-// Returns the content theme for a given format + emotion, with emotion winning.
-function contentTheme(format, emotion) {
+// Color psychology by STORY TYPE (the GPT-rules spec, Rule 9). Highest
+// priority — a story's category sets the emotional palette of the background.
+// Like CONTENT_THEMES, the accent here is only a SUGGESTION: a brand with a
+// custom accent keeps it (theme() below), so this colours the gradient, not
+// the brand. person_news/prediction/comparison/timeline/explainer intentionally
+// have no entry — they keep the format/emotion palette (the photo or structure
+// carries the meaning).
+const STORY_THEMES = {
+  // financial success → green + gold on black
+  money_news:    { bg: "linear-gradient(140deg,#04100a 0%,#0a2016 40%,#13301c 70%,#1f2a08 100%)", accent: "#fbbf24" },
+  achievement:   { bg: "linear-gradient(140deg,#100800 0%,#1f1200 40%,#301c00 70%,#402600 100%)", accent: "#f59e0b" },
+  // breaking → red / white / black urgency
+  breaking_news: { bg: "linear-gradient(145deg,#160202 0%,#2a0606 45%,#3a0808 75%,#240404 100%)", accent: "#ef4444" },
+  // politics/policy → navy / white
+  policy:        { bg: "linear-gradient(150deg,#03060f 0%,#070f22 45%,#0b1836 75%,#0a1530 100%)", accent: "#93c5fd" },
+  // war/conflict → desaturated, dark, serious
+  war_conflict:  { bg: "linear-gradient(160deg,#0a0c0e 0%,#13171c 45%,#1c2228 75%,#15191e 100%)", accent: "#94a3b8" },
+  // controversy → crimson tension
+  controversy:   { bg: "linear-gradient(145deg,#16040a 0%,#260818 40%,#360a22 70%,#240616 100%)", accent: "#fb7185" },
+  // data → blue, ranking/numbers
+  data_news:     { bg: "linear-gradient(150deg,#04060f 0%,#081226 45%,#0c1e3e 75%,#0a1830 100%)", accent: "#38bdf8" },
+  // sports → energetic orange
+  sports:        { bg: "linear-gradient(140deg,#120600 0%,#221000 45%,#331800 75%,#3a1c00 100%)", accent: "#fb923c" },
+  // quote → purple eloquence
+  quote:         { bg: "linear-gradient(135deg,#080310 0%,#12062a 40%,#180840 70%,#100530 100%)", accent: "#c084fc" },
+};
+
+// Theme for a card: STORY type (highest), then emotion, then format.
+function contentTheme(format, emotion, story) {
+  if (story && STORY_THEMES[story]) return STORY_THEMES[story];
   if (emotion && CONTENT_THEMES[emotion]) return CONTENT_THEMES[emotion];
   if (format && CONTENT_THEMES[format]) return CONTENT_THEMES[format];
   return null;
@@ -140,7 +168,7 @@ export function theme(brand) {
   // Content-aware identity: format + emotion → gradient + accent suggestion.
   // Brand accent_color always wins — this only fills in when the brand kit
   // has no explicit accent (i.e. still on the default #4da3ff).
-  const ct = contentTheme(b.content_format, b.content_emotion);
+  const ct = contentTheme(b.content_format, b.content_emotion, b.content_story);
   const brandHasCustomAccent = (brand || {}).accent_color &&
                                 (brand || {}).accent_color !== DEFAULTS.accent_color;
   const resolvedAccent = brandHasCustomAccent ? b.accent_color
