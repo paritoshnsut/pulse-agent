@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from time import mktime
 from typing import Optional
 
@@ -75,7 +75,12 @@ def parse_trends(parsed: feedparser.FeedParserDict, region=None) -> list[dict]:
             continue
         # ht namespace fields vary; pull traffic + first news link if present
         traffic = e.get("ht_approx_traffic") or ""
-        link = e.get("link") or f"https://www.google.com/search?q={title.replace(' ', '+')}"
+        base_link = e.get("link") or f"https://www.google.com/search?q={title.replace(' ', '+')}"
+        # Append today's date so the same trending topic is treated as a fresh
+        # article each day — trends represent what's hot RIGHT NOW, not a
+        # permanent piece of content, so yesterday's entry shouldn't dedup today's.
+        today_str = date.today().isoformat()
+        link = f"{base_link}{'&' if '?' in base_link else '?'}_pd={today_str}"
         out.append({
             "source": "trends",
             "source_name": "Google Trends",

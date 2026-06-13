@@ -241,6 +241,42 @@ def build_router(require_auth: Callable, own_account: Callable,
                 | {"preview": (p.get("content") or "")[:120]}
                 for p in posts if p["account_id"] in mine][: max(1, min(limit, 200))]
 
+    # ------------------------------------------------- ingested articles log
+    @router.get("/articles")
+    def articles_log(source: Optional[str] = None, days: int = 1,
+                     limit: int = 100, offset: int = 0,
+                     user: dict = Depends(require_auth)):
+        """Flat log of every article the watchers pulled in, with source,
+        title, URL, vertical, velocity hint, and raw JSON on demand."""
+        since = _since(days)
+        q = """SELECT id, source, source_name, title, url, vertical,
+                      velocity_hint, published_at, fetched_at, raw_json
+               FROM articles WHERE fetched_at >= ?"""
+        params: list = [since]
+        if source:
+            q += " AND source = ?"
+            params.append(source)
+        q += " ORDER BY fetched_at DESC LIMIT ? OFFSET ?"
+        params += [max(1, min(limit, 500)), max(0, offset)]
+        with get_conn(db()) as conn:
+            rows = _rows(conn, q, params)
+            total = _n(conn,
+                "SELECT COUNT(*) FROM articles WHERE fetched_at >= ?" +
+                (" AND source = ?" if source else ""),
+                [since] + ([source] if source else []))
+            sources = _rows(conn, """SELECT source, COUNT(*) n
+                FROM articles WHERE fetched_at >= ?
+                GROUP BY source ORDER BY n DESC""", (since,))
+        # parse raw_json strings → objects so the client gets real JSON
+        for r in rows:
+            if r.get("raw_json"):
+                try:
+                    r["raw_json"] = json.loads(r["raw_json"])
+                except Exception:
+                    pass
+        return {"total": total, "offset": offset, "limit": limit,
+                "sources": sources, "articles": rows}
+
     # ------------------------------------------------- content graph viewer
     @router.get("/graph/{asset_id}")
     def graph(asset_id: int, user: dict = Depends(require_auth)):
