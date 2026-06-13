@@ -90,8 +90,9 @@ EXTRACT_PROMPT = """Analyze this social post and decide its best VISUAL approach
    colour-popped (e.g. "TRILLIONAIRE", "FREE", "INDIA"). MUST be an exact
    substring of the headline. "" if nothing deserves emphasis.
 
-6) SUBHEADLINE — one short supporting line, max 8 words ("Now richer than most
-   nations"). "" if the headline stands alone.
+6) SUBHEADLINE — a SECOND HOOK, max 8 words, that adds intrigue rather than
+   restating the headline ("Now richer than most nations", "Why diplomats fear
+   the new model"). Create curiosity, never metadata. "" if nothing adds.
 
 7) TAG — a tiny editorial pill that orients the viewer, 1-3 words, often a
    relation or label: "NEW ENVOY", "US → INDIA", "TRUMP ALLY", "₹1 LAKH CR",

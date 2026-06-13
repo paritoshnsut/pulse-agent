@@ -317,6 +317,14 @@ function highlightedHeadline(text, highlight, t, fontSize) {
   }, w)));
 }
 
+// hex → rgba (Satori is happiest with rgba() for translucent fills).
+function rgba(hex, a) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return `rgba(245,158,11,${a})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
 // A subtle radial vignette — darkens the edges so the card reads with depth
 // instead of flat PowerPoint. Satori supports radial-gradient (verified).
 function vignette(dims) {
@@ -335,7 +343,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
   const tag = (data.tag || "").trim();
   const overline = (data.overline || "").trim();
   const backdrop = data.backdrop || null;  // {src, credit} — contextual scene
-  const imgW = img ? Math.round(dims.width * 0.44) : 0;
+  const imgW = img ? Math.round(dims.width * 0.38) : 0;  // editorial space > face
   const textW = dims.width - imgW;
 
   // image column: a flow <img> filling a fixed box (dual_portrait's proven
@@ -356,6 +364,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
     padding: "64px 56px", justifyContent: "space-between", color: t.fg,
   }, [
     el("div", { display: "flex", flexDirection: "column" }, [
+      el("div", { display: "flex", marginBottom: 22 }, [accentBar(t)]),
       // tag pill (preferred) → plain accent overline → nothing
       tag ? pill(t, tag)
         : overline
@@ -372,19 +381,28 @@ export function heroPortrait(data, brand, dims = SIZE) {
     footer(t),
   ]);
 
-  // background storytelling: a faint, legally-licensed contextual scene (a
-  // landmark/flag) behind the text, under a legibility scrim. The portrait
-  // (opaque) covers it on the right; the scrim keeps the headline readable.
+  // Editorial layer stack (the "≥3 layers" rule): base palette gradient (root)
+  // → soft licensed contextual scene → legibility scrim → faint dot-grid
+  // texture → ambient glow behind the subject → portrait → typography → vignette.
   const layers = [];
   if (backdrop && backdrop.src) {
     layers.push({ type: "img", props: { src: backdrop.src,
       width: dims.width, height: dims.height,
       style: { position: "absolute", top: 0, left: 0, width: dims.width,
-        height: dims.height, objectFit: "cover", opacity: 0.28 } } });
+        height: dims.height, objectFit: "cover", opacity: 0.34 } } });
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: "linear-gradient(90deg, rgba(8,10,14,0.86) 0%, "
-        + "rgba(8,10,14,0.55) 46%, rgba(8,10,14,0.12) 100%)" }));
+      background: "linear-gradient(90deg, rgba(8,10,14,0.82) 0%, "
+        + "rgba(8,10,14,0.5) 48%, rgba(8,10,14,0.08) 100%)" }));
+  }
+  // texture (faint dot grid / motif) so the canvas isn't a flat rectangle
+  layers.push(...decorLayer(t, { style: "subtle", seed: 0 }));
+  // ambient glow behind the subject — separation + premium atmosphere
+  if (img) {
+    layers.push(el("div", { position: "absolute", top: 0, left: 0,
+      width: dims.width, height: dims.height,
+      background: `radial-gradient(34% 50% at ${textW + Math.round(imgW * 0.15)}px 46%, `
+        + `${rgba(t.accent, 0.20)}, rgba(0,0,0,0) 72%)` }));
   }
   layers.push(el("div", { display: "flex", width: dims.width, height: dims.height },
     imgCol ? [textCol, imgCol] : [textCol]));

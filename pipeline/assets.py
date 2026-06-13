@@ -110,16 +110,20 @@ def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s or "").strip()
 
 
-def resolve_symbol(query: str, timeout: int = 8) -> Optional[dict]:
+def resolve_symbol(query: str, width: int = 1200, timeout: int = 8) -> Optional[dict]:
     """A concept ("US Capitol", "Indian flag", "parliament building") → a
     CC/PD-licensed Commons image as {src, width, height, credit}, or None.
 
     This is the LEGAL background path: Commons images carry an explicit license,
     so (unlike a Google-Images press photo) reuse is permitted; CC-BY ones get a
     credit string the card can show. Filtered to reuse-permitting licenses and
-    raster formats Pillow can read. Per-query cached (negative results too)."""
-    key = (query or "").strip().lower()
-    if not key:
+    raster formats Pillow can read. Per-query cached (negative results too).
+
+    `width` is the thumbnail width fetched — a small value (e.g. 420) yields a
+    soft, slightly-blurred backdrop when the template upscales it (Satori has no
+    blur filter, so downscaling is the blur)."""
+    key = f"{(query or '').strip().lower()}@{width}"
+    if not key.strip("@"):
         return None
     if key in _SYMBOL_CACHE:
         return _SYMBOL_CACHE[key]
@@ -131,7 +135,7 @@ def resolve_symbol(query: str, timeout: int = 8) -> Optional[dict]:
                                 "generator": "search", "gsrnamespace": 6,
                                 "gsrsearch": query, "gsrlimit": 8,
                                 "prop": "imageinfo", "iiprop": "url|mime|extmetadata",
-                                "iiurlwidth": 1200})
+                                "iiurlwidth": width})
         resp.raise_for_status()
         pages = (resp.json().get("query") or {}).get("pages") or {}
         for page in pages.values():
