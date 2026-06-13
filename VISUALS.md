@@ -164,6 +164,88 @@ imagery underneath. Lives in `pipeline/design.py` + the `hero_card` template.
 | Instagram inspiration feed → automatic ref suggestions | ⏳ V2b (upstream shape built: `watch/instagram.py` intent:"inspiration") |
 | Alternate image models (Flux / Ideogram / SDXL) behind the same interface | ⏳ when needed |
 
+## Phase V2.5 — content-aware color (SHIPPED)
+
+The flat-dark / single-gradient background made every card look the same
+regardless of what it said. Now the background carries the content's
+emotional register: a `CONTENT_THEMES` map in `render/ui.mjs` keys format +
+dominant emotion → a deep multi-stop gradient + a suggested accent.
+
+| Item | Status |
+|---|---|
+| Per-format gradient palettes: hot_take (fiery red-orange), contradiction (crimson-purple tension), data_story (ocean blue), thread (indigo), prediction (amber-gold), counter_narrative (emerald), explainer (slate-blue), achievement (gold), quote_context (purple), evergreen (forest), callback (teal), video_reaction (magenta) | ✅ |
+| Emotion overrides format (outrage → red even on a data story); 6 emotion palettes (outrage/curiosity/pride/humour/surprise/validation) | ✅ |
+| **Brand accent always wins** — a kit with a custom `accent_color` keeps its accent; content theming only fills the background gradient + the accent when the kit is still on the default. `bg_style:light` always respected. | ✅ |
+| `format` + `meta_json.dominant_emotion` threaded from the post into `brand_payload(account, kit, post)` at every render call site | ✅ |
+
+## Phase V3 — the Visual Intelligence Engine (entity-aware imagery)
+
+> **The reframe (do NOT build "fetch from Google Images").** The goal is not
+> image *fetching*; it is *visual intelligence* — the system understands WHO
+> and WHAT a post is about, decides what KIND of visual fits, and only then
+> resolves an asset, from **licensed sources**, composited with brand
+> treatment. The literal "scrape Google" mechanism is refused: copyright
+> (press photos are Reuters/AP/Getty), wrong-image risk (a political account
+> posting the wrong soldiers = a fake-news ratio), and implied-narrative /
+> likeness exposure. We already chose generation over scraping in V2 for
+> exactly these reasons; this phase honours that and adds the missing branch.
+>
+> **What's already done (so this is smaller than it looks):** the strategy
+> router already picks between three of the four visual strategies —
+> *data_driven* (`chart_card`), *diagram_driven* (`blueprints.mjs`), and
+> *typography_driven* (quote/stat/insight). The ONLY missing branch is
+> **photo_driven**. And the learning layer already exists (`visual_prefs.py`
+> Visual Genome) — this phase adds `visual_strategy` as a new dimension it
+> learns over, it does not rebuild it.
+>
+> **The honest limit:** for the *breaking scene itself* (today's call, the
+> specific soldiers) no licensed asset exists — only press agencies have it.
+> So *portraits of named people* work; *a photo of the event* never does via
+> automation. The scroll-stopping version of the Modi–Trump example is a
+> treated **dual-portrait card**, not a photo of the call.
+
+### Phase V3a — visual entity + strategy extraction (the brain)
+
+| Item | Status |
+|---|---|
+| Extend the existing article-understanding / decision Claude call to also emit `entities` (people / orgs / products / locations, each typed + role) — no new call, ride the one already made | ⏳ next |
+| Emit `visual_strategy` ∈ {photo_portrait, photo_vs, data, diagram, product, typography} — the classifier that decides photo-driven vs the three branches we already render | ⏳ next |
+| Cache entities + strategy on the post meta (same posture as chart/blueprint: extract-never-invent, cached, misses cached, transient failures retry) | ⏳ next |
+
+### Phase V3b — licensed asset resolution (the hands)
+
+| Item | Status |
+|---|---|
+| **Tier 1 — Wikipedia REST lead-image** for named public figures: `…/page/summary/{name}` → `thumbnail.source`. We ALREADY call this API in `watch/trends.py`; the lead image is Wikipedia-editor-disambiguated, almost always the clean official portrait. One keyless call solves ~80% of "fetch the right face." | ⏳ |
+| **Tier 2 — Wikimedia Commons / Openverse CC search** for concepts, places, objects (filter to commercial-use licenses) | ⏳ |
+| **Tier 3 — existing `gpt-image-1`** (`design.py`) for abstract concepts with no real entity | ✅ (exists, reused) |
+| **No Tier 4.** No Google fallback. No-asset → existing typographic/procedural card. The wrong-image tail risk on a political account is asymmetric and uncompensated. | 🚫 by design |
+| Attribution line in the card footer when a CC asset requires it (small credit string) | ⏳ |
+| Per-entity portrait cache (resolve once, reuse — Modi's portrait doesn't change weekly) | ⏳ |
+
+### Phase V3c — treated layouts (the taste)
+
+| Item | Status |
+|---|---|
+| `dual_portrait` / `vs_portrait` template — two CC portraits, brand-color duotone or cut-out treatment, accent "×"/"vs" between, headline below. THE Modi–Trump case. | ⏳ |
+| `hero_portrait` template — single treated portrait + headline (composites onto the existing `hero_card` scrim path) | ⏳ |
+| Mandatory brand treatment (duotone / scrim / cut-out) on every fetched photo — raw photos are never placed flat; treatment is what makes the feed consistent AND reads as "news desk made it," not "scraped" | ⏳ |
+| `product_showcase` layout (company/product entities) | ⏸ — after the person-subject path proves out |
+
+### Phase V3d — learning (reuse the Genome)
+
+| Item | Status |
+|---|---|
+| Log `visual_strategy` alongside `visual_template` (already logged); `visual_prefs.py` learns which strategies this account's audience rewards (e.g. "political → portraits +X%, finance → charts +Y%") | ⏳ — extends the existing log, no new loop |
+
+**Sequencing note:** this is a 2–4 day build and should come AFTER the core
+loop is validated end-to-end (signals → draft → Telegram → approve → post)
+with live credits. Minimum spiky v1 = V3a (person/strategy extraction) +
+V3b Tier 1 (Wikipedia portraits) + V3c `dual_portrait`/`hero_portrait`.
+Skip Openverse, product shots, and the learning dimension until that lands.
+
+---
+
 ## Deferred / refused
 
 - ⏸ **Headless Chromium renderer** — trigger above.
@@ -174,3 +256,8 @@ imagery underneath. Lives in `pipeline/design.py` + the `hero_card` template.
   tools they know.
 - 🚫 **AI image generators as the layout/typography engine** — wrong tool,
   permanently.
+- 🚫 **Scraping Google Images for assets** — copyright (results are press-agency
+  photos), wrong-image risk (a political account posting the wrong scene is a
+  fake-news event), and implied-narrative/likeness exposure. Replaced by the
+  licensed-source resolver in Phase V3 (Wikipedia/Wikimedia/Openverse). The
+  *goal* (real faces on cards) is kept; the *mechanism* is refused.
