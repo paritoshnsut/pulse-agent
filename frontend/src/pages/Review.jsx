@@ -22,6 +22,27 @@ function DraftCard({ p, refresh }) {
   const [steer, setSteer] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null);
+
+  // The rendered card path is persisted on the post (meta_json.visual /
+  // visual_slides), so approved/outbox drafts can show their image without a
+  // live approve. preview holds an on-demand render (pre-approval / template swap).
+  const storedSlides = (meta.visual_slides || []).map((n) => `/visuals/${n}`);
+  const storedCard = meta.visual ? `/visuals/${meta.visual}` : null;
+  const cardUrl = preview?.card_url ?? pkg?.card_url ?? storedCard;
+  const visualUrls = (preview?.visual_urls?.length && preview.visual_urls)
+    || (pkg?.visual_urls?.length && pkg.visual_urls)
+    || storedSlides;
+
+  const genVisual = async (template) => {
+    setBusy(true); setMsg('');
+    try {
+      const q = typeof template === 'string' ? `?template=${template}` : '';
+      const r = await api(`/api/drafts/${p.id}/visual${q}`, { method: 'POST' });
+      setPreview({ card_url: r.card_url,
+                   visual_urls: r.visual_urls?.length ? r.visual_urls : [r.card_url] });
+    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+  };
 
   const approve = async () => {
     setPkg(await api(`/api/drafts/${p.id}/approve`, { method: 'POST' }));
@@ -168,6 +189,9 @@ function DraftCard({ p, refresh }) {
           <div className="flex gap-2 items-center">
             <Btn color="green" onClick={approve}>✅ Approve</Btn>
             <Btn color="red" onClick={rejectIt}>❌ Reject</Btn>
+            <Btn color="zinc" disabled={busy} onClick={genVisual}>
+              🖼 {busy ? '…' : 'preview visual'}
+            </Btn>
             <Input placeholder="reject reason (optional — teaches the voice)"
                    value={rejectReason} onInput={(e) => setRejectReason(e.target.value)} />
           </div>
@@ -235,6 +259,45 @@ function DraftCard({ p, refresh }) {
                    onInput={(e) => setPostedUrl(e.target.value)} className="max-w-xs" />
             <Btn color="green" onClick={posted}>I posted it ✓</Btn>
           </div>
+        </div>
+      )}
+
+      {/* The card persists on the post, so approved/outbox drafts and on-demand
+          previews show it here too — not only in the live just-approved flash. */}
+      {!pkg && (cardUrl || visualUrls.length > 0) && (
+        <div className="mt-4 border-t border-zinc-800 pt-4 space-y-2">
+          {visualUrls.length > 1 ? (
+            <>
+              <div className="text-sm text-zinc-400 mb-1">
+                🎠 carousel — {visualUrls.length} slides (download all, post in order):
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {visualUrls.map((u, i) => (
+                  <a key={u} href={u} download className="shrink-0 text-center">
+                    <img src={u} alt={`slide ${i + 1}`}
+                         className="rounded-lg border border-zinc-800 h-40 w-40 object-cover" />
+                    <div className="text-xs text-sky-400 mt-1">slide {i + 1} ↓</div>
+                  </a>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <img src={cardUrl || visualUrls[0]} alt="post card"
+                   className="rounded-xl border border-zinc-800 max-w-md w-full" />
+              <div className="flex gap-2 items-center mt-1.5 flex-wrap">
+                <a href={cardUrl || visualUrls[0]} download className="text-sky-400 text-sm">
+                  download ↓
+                </a>
+                {['quote_card', 'stat_highlight', 'insight_card'].map((t) => (
+                  <Btn key={t} color="zinc" disabled={busy} className="!py-1 !px-2 text-xs"
+                    onClick={() => genVisual(t)}>
+                    ↻ {t.replace('_', ' ')}
+                  </Btn>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
