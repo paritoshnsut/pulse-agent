@@ -553,11 +553,21 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
         logger.info("Portrait visual for #%d: %s via %s", post_id, path.name, tmpl)
         return str(path)
 
+    # 'big_number' is the explicit name for a BBC-style single-number card
+    # (Rule 7); it renders through stat_highlight with a Claude-formatted number.
+    BIGNUM_STORIES = ("money_news", "data_news", "achievement", "sports")
     try:
         from pipeline.entities import VisualEntityExtractor, looks_entity_rich
+        content = post.get("content") or ""
+        # fire the brief when an image card is asked for, or (auto) when the post
+        # names a real subject OR leads with a number worth a big-number card.
+        has_number = bool(re.search(
+            r"[$₹]\s?\d|\d{2,}|\d\s?%|\bper ?cent|\bcrore|\blakh|\bbillion|"
+            r"\btrillion|\bmillion|\brecord\b|\branks?\b", content, re.I))
+        explicit_img = template in PORTRAIT_TEMPLATES or template == "big_number"
         auto_ok = (template is None and not (PORTRAIT_TEMPLATES & shunned)
-                   and looks_entity_rich(post.get("content") or ""))
-        if template in PORTRAIT_TEMPLATES or auto_ok:
+                   and (looks_entity_rich(content) or has_number))
+        if explicit_img or auto_ok:
             from pipeline.assets import resolve_portrait
             brief = VisualEntityExtractor().brief_for(post, db_path=db_path) or {}
             # surface the brief on the in-memory post so brand_payload's Rule-9
@@ -572,16 +582,16 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             strat = ("image_vs" if template == "dual_portrait"
                      else "image_portrait" if template == "hero_portrait"
                      else brief.get("visual_strategy"))
-            # crafted 6-12 word headline + short subheadline (the Visual Brief,
-            # Rules 5/6/18); fall back to the post's lead when the brief is old
-            # or empty.
             head = brief.get("headline") or _portrait_headline(post)
             sub = brief.get("subheadline") or ""
             highlight = brief.get("highlight") or ""
             tag = brief.get("tag") or ""
             kicker = _STORY_KICKER.get(brief.get("story_type") or "", "")
+            big_number = brief.get("big_number") or ""
             out = None
-            if strat == "image_vs" and len(subjects) >= 2:
+            # portraits first (the face is the strongest element, Rule 12) —
+            # never for an explicit big_number request.
+            if template != "big_number" and strat == "image_vs" and len(subjects) >= 2:
                 a = resolve_portrait(subjects[0]["name"])
                 b = resolve_portrait(subjects[1]["name"])
                 if a and b:
@@ -589,17 +599,26 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
                         "text": head, "highlight": highlight, "subheadline": sub,
                         "tag": tag, "images": [a, b],
                         "labels": [subjects[0]["name"], subjects[1]["name"]]})
-            elif strat == "image_portrait" and subjects:
+            elif template != "big_number" and strat == "image_portrait" and subjects:
                 a = resolve_portrait(subjects[0]["name"])
                 if a:
                     out = _render_image("hero_portrait", {
                         "text": head, "highlight": highlight, "subheadline": sub,
                         "tag": tag, "overline": kicker, "image": a})
+            # BIG NUMBER card (Rule 7): one number IS the story. Explicit ask, or
+            # auto for money/data/achievement/sports when a number dominates and
+            # no portrait fit. The number is the hero; the headline is its label.
+            if out is None and (template == "big_number"
+                                or brief.get("story_type") in BIGNUM_STORIES):
+                stat = big_number or extract_stat(content)
+                if stat:
+                    out = _render_image("stat_highlight",
+                                        {"stat": stat, "context": sub or head})
             if out:
                 return out
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Portrait path failed for #%d: %s", post_id, exc)
-    if template in PORTRAIT_TEMPLATES:
+        logger.warning("Image-card path failed for #%d: %s", post_id, exc)
+    if template in PORTRAIT_TEMPLATES or template == "big_number":
         template = None  # explicit ask, couldn't resolve → auto-pick a card
 
     # data visualization: an explicit chart_card request, or a data_story on

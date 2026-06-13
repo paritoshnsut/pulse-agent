@@ -97,15 +97,22 @@ EXTRACT_PROMPT = """Analyze this social post and decide its best VISUAL approach
    relation or label: "NEW ENVOY", "US → INDIA", "TRUMP ALLY", "₹1 LAKH CR",
    "KG TO PG". "" if none fits. (More specific than the story category.)
 
+8) BIG_NUMBER — if ONE number IS the story (a record, net worth, ranking,
+   percentage, count, money), the number formatted for a giant display:
+   "$1 TRILLION", "300%", "64", "₹1 LAKH CR", "3rd". "" if no single number
+   dominates the story.
+
 Return ONLY JSON:
 {{"entities": [{{"name": "...", "type": "person", "role": "subject"}}],
   "visual_strategy": "image_vs", "story_type": "breaking_news",
-  "headline": "...", "highlight": "...", "subheadline": "...", "tag": "..."}}
+  "headline": "...", "highlight": "...", "subheadline": "...", "tag": "...",
+  "big_number": "..."}}
 
 If the post has no named real-world subject and no data, still return a tight
 headline + subheadline for a typography card:
 {{"entities": [], "visual_strategy": "typography", "story_type": "",
-  "headline": "...", "highlight": "", "subheadline": "...", "tag": ""}}
+  "headline": "...", "highlight": "", "subheadline": "...", "tag": "",
+  "big_number": ""}}
 
 Rules: extract names, never invent. Max 8 entities. One strategy. Headline 3-8
 plain words. Never manufacture drama the post doesn't support.
@@ -176,7 +183,8 @@ def validate_visual_brief(raw: Any) -> Optional[dict]:
     return {"entities": ents, "visual_strategy": strat, "story_type": story,
             "headline": headline, "highlight": highlight,
             "subheadline": _clamp(raw.get("subheadline"), 80),
-            "tag": _clamp(raw.get("tag"), 24)}
+            "tag": _clamp(raw.get("tag"), 24),
+            "big_number": _clamp(raw.get("big_number"), 14)}
 
 
 # A multi-word proper noun ("Narendra Modi") or an all-caps acronym ("RBI").
@@ -251,7 +259,7 @@ class VisualEntityExtractor:
         # cached hit (incl. the typography verdict) — but a brief from before
         # the latest fields (headline/highlight/tag) existed is treated as a
         # miss so the post upgrades to the richer brief on its next render.
-        if isinstance(cached, dict) and "tag" in cached:
+        if isinstance(cached, dict) and "big_number" in cached:
             return validate_visual_brief(cached)
 
         article_text = _source_text(post, db_path)

@@ -295,7 +295,17 @@ function highlightedHeadline(text, highlight, t, fontSize) {
   }, words.map((w, i) => el("div", {
     display: "flex", fontSize, fontWeight: 800, lineHeight: 1.1,
     color: marked.has(i) ? t.accent : t.fg,
+    textShadow: "0 2px 14px rgba(0,0,0,0.5)",
   }, w)));
+}
+
+// A subtle radial vignette — darkens the edges so the card reads with depth
+// instead of flat PowerPoint. Satori supports radial-gradient (verified).
+function vignette(dims) {
+  return el("div", {
+    position: "absolute", top: 0, left: 0, width: dims.width, height: dims.height,
+    background: "radial-gradient(125% 130% at 50% 30%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.45) 100%)",
+  });
 }
 
 export function heroPortrait(data, brand, dims = SIZE) {
@@ -344,8 +354,11 @@ export function heroPortrait(data, brand, dims = SIZE) {
   ]);
 
   return el("div", { width: dims.width, height: dims.height, display: "flex",
-    background: t.background, fontFamily: t.font },
-    imgCol ? [textCol, imgCol] : [textCol]);
+    position: "relative", background: t.background, fontFamily: t.font }, [
+    el("div", { display: "flex", width: dims.width, height: dims.height },
+      imgCol ? [textCol, imgCol] : [textCol]),
+    vignette(dims),
+  ]);
 }
 
 export function dualPortrait(data, brand, dims = SIZE) {
@@ -383,24 +396,28 @@ export function dualPortrait(data, brand, dims = SIZE) {
     border: "5px solid " + t.background,
   }, "VS");
 
-  return el("div", { width: "100%", height: "100%", display: "flex", flexDirection: "column",
-    background: t.background, fontFamily: t.font }, [
-    el("div", { display: "flex", position: "relative" }, [
-      half(imgs[0], labels[0]), half(imgs[1], labels[1]), vs,
-    ]),
-    el("div", { display: "flex", flexGrow: 1, flexDirection: "column",
-      padding: "32px 56px", justifyContent: "space-between", color: t.fg }, [
-      el("div", { display: "flex", flexDirection: "column" }, [
-        tag ? pill(t, tag) : el("div", { display: "flex" }),
-        el("div", { display: "flex", marginTop: tag ? 14 : 0 },
-          [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 52, 30))]),
-        sub
-          ? el("div", { fontSize: 28, color: t.muted, lineHeight: 1.3,
-              marginTop: 14, display: "flex" }, sub)
-          : el("div", { display: "flex" }),
+  return el("div", { width: dims.width, height: dims.height, display: "flex",
+    position: "relative", background: t.background, fontFamily: t.font }, [
+    el("div", { width: dims.width, height: dims.height, display: "flex",
+      flexDirection: "column" }, [
+      el("div", { display: "flex", position: "relative" }, [
+        half(imgs[0], labels[0]), half(imgs[1], labels[1]), vs,
       ]),
-      footer(t),
+      el("div", { display: "flex", flexGrow: 1, flexDirection: "column",
+        padding: "32px 56px", justifyContent: "space-between", color: t.fg }, [
+        el("div", { display: "flex", flexDirection: "column" }, [
+          tag ? pill(t, tag) : el("div", { display: "flex" }),
+          el("div", { display: "flex", marginTop: tag ? 14 : 0 },
+            [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 52, 30))]),
+          sub
+            ? el("div", { fontSize: 28, color: t.muted, lineHeight: 1.3,
+                marginTop: 14, display: "flex" }, sub)
+            : el("div", { display: "flex" }),
+        ]),
+        footer(t),
+      ]),
     ]),
+    vignette(dims),
   ]);
 }
 

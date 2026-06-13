@@ -238,7 +238,7 @@ function DraftCard({ p, refresh }) {
                 <a href={pkg.card_url} download className="text-sky-400 text-sm">
                   download ↓
                 </a>
-                {['quote_card', 'stat_highlight', 'insight_card', 'hero_portrait', 'dual_portrait'].map((t) => (
+                {['quote_card', 'big_number', 'insight_card', 'hero_portrait', 'dual_portrait'].map((t) => (
                   <Btn key={t} color="zinc" disabled={busy} className="!py-1 !px-2 text-xs"
                     onClick={async () => {
                       setBusy(true);
@@ -289,7 +289,7 @@ function DraftCard({ p, refresh }) {
                 <a href={cardUrl || visualUrls[0]} download className="text-sky-400 text-sm">
                   download ↓
                 </a>
-                {['quote_card', 'stat_highlight', 'insight_card', 'hero_portrait', 'dual_portrait'].map((t) => (
+                {['quote_card', 'big_number', 'insight_card', 'hero_portrait', 'dual_portrait'].map((t) => (
                   <Btn key={t} color="zinc" disabled={busy} className="!py-1 !px-2 text-xs"
                     onClick={() => genVisual(t)}>
                     ↻ {t.replace('_', ' ')}
