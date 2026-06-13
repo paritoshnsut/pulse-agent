@@ -325,12 +325,12 @@ function rgba(hex, a) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-// A subtle radial vignette — darkens the edges so the card reads with depth
-// instead of flat PowerPoint. Satori supports radial-gradient (verified).
-function vignette(dims) {
+// A subtle radial vignette — darkens only the far corners for depth. Kept light
+// (and with a wide clear centre) so it never flattens the card to black.
+function vignette(dims, strength = 0.28) {
   return el("div", {
     position: "absolute", top: 0, left: 0, width: dims.width, height: dims.height,
-    background: "radial-gradient(125% 130% at 50% 30%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.45) 100%)",
+    background: `radial-gradient(135% 145% at 50% 32%, rgba(0,0,0,0) 64%, rgba(0,0,0,${strength}) 100%)`,
   });
 }
 
@@ -352,10 +352,12 @@ export function heroPortrait(data, brand, dims = SIZE) {
     ? el("div", { display: "flex", width: imgW, height: dims.height, position: "relative" }, [
         { type: "img", props: { src: img.src, width: imgW, height: dims.height,
           style: { width: imgW, height: dims.height, objectFit: "cover" } } },
+        // blend the portrait's left edge into the panel (tinted, not black)
         el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
-          background: `linear-gradient(90deg, ${t.background} 0%, rgba(0,0,0,0) 28%)` }),
+          background: `linear-gradient(90deg, ${rgba(t.scrim, 0.95)} 0%, rgba(0,0,0,0) 30%)` }),
+        // light bottom grounding only
         el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
-          background: `linear-gradient(180deg, rgba(8,10,14,0) 62%, rgba(8,10,14,0.5) 100%)` }),
+          background: `linear-gradient(180deg, rgba(0,0,0,0) 68%, ${rgba(t.scrim, 0.45)} 100%)` }),
       ])
     : null;
 
@@ -389,24 +391,27 @@ export function heroPortrait(data, brand, dims = SIZE) {
     layers.push({ type: "img", props: { src: backdrop.src,
       width: dims.width, height: dims.height,
       style: { position: "absolute", top: 0, left: 0, width: dims.width,
-        height: dims.height, objectFit: "cover", opacity: 0.34 } } });
+        height: dims.height, objectFit: "cover", opacity: 0.42 } } });
+    // LOCALIZED + TINTED scrim: darken only the text (left) side, fading to
+    // clear over the portrait. Tinted toward the palette base, never pure black,
+    // so the scene's colour survives (review: no global black overlay).
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: "linear-gradient(90deg, rgba(8,10,14,0.82) 0%, "
-        + "rgba(8,10,14,0.5) 48%, rgba(8,10,14,0.08) 100%)" }));
+      background: `linear-gradient(90deg, ${rgba(t.scrim, 0.78)} 0%, `
+        + `${rgba(t.scrim, 0.42)} 42%, rgba(0,0,0,0) 72%)` }));
   }
   // texture (faint dot grid / motif) so the canvas isn't a flat rectangle
   layers.push(...decorLayer(t, { style: "subtle", seed: 0 }));
-  // ambient glow behind the subject — separation + premium atmosphere
+  // ambient colour glow behind the subject — separation + premium atmosphere
   if (img) {
     layers.push(el("div", { position: "absolute", top: 0, left: 0,
       width: dims.width, height: dims.height,
-      background: `radial-gradient(34% 50% at ${textW + Math.round(imgW * 0.15)}px 46%, `
-        + `${rgba(t.accent, 0.20)}, rgba(0,0,0,0) 72%)` }));
+      background: `radial-gradient(42% 58% at ${textW + Math.round(imgW * 0.1)}px 44%, `
+        + `${rgba(t.accent, 0.30)}, rgba(0,0,0,0) 70%)` }));
   }
   layers.push(el("div", { display: "flex", width: dims.width, height: dims.height },
     imgCol ? [textCol, imgCol] : [textCol]));
-  layers.push(vignette(dims));
+  layers.push(vignette(dims, 0.22));
   if (backdrop && backdrop.credit) {
     layers.push(el("div", { position: "absolute", bottom: 14, right: 18,
       fontFamily: SANS, fontSize: 16, color: "rgba(245,247,250,0.5)",

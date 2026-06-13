@@ -155,6 +155,17 @@ function contentTheme(format, emotion, story) {
 
 const FONT_NAMES = { sans: "Inter", serif: "Lora", mono: "JetBrains Mono" };
 
+// A very dark TINT of a colour (not pure black) — used for the scrim so an
+// overlay carries the theme's hue (dark-red over a red story, dark-navy over
+// policy) instead of crushing everything to black.
+function darken(hex, f) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return "#0a0c10";
+  const n = parseInt(m[1], 16);
+  const c = (sh) => Math.round(((n >> sh) & 255) * f).toString(16).padStart(2, "0");
+  return `#${c(16)}${c(8)}${c(0)}`;
+}
+
 export function theme(brand) {
   const b = { ...DEFAULTS, ...Object.fromEntries(
     Object.entries(brand || {}).filter(([, v]) => v)) };
@@ -199,6 +210,8 @@ export function theme(brand) {
     panel: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.035)",
     panelBorder: dark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)",
     background,
+    // tinted dark for overlays/scrims — never pure black (carries theme hue)
+    scrim: dark ? darken(resolvedAccent, 0.16) : "#1a1d24",
     watermark: b.watermark_text || "",
     handle: b.handle || "",
     logo: b.logo || null,   // {src: dataURL, width, height} prepared by Python

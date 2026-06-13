@@ -616,8 +616,12 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             # BIG NUMBER card (Rule 7): one number IS the story. Explicit ask, or
             # auto for money/data/achievement/sports when a number dominates and
             # no portrait fit. The number is the hero; the headline is its label.
+            # auto big-number for single-number stories — but a data_story with
+            # a chartable series belongs to chart_card (handled below), so don't
+            # preempt it; an explicit big_number request always wins.
             if out is None and (template == "big_number"
-                                or brief.get("story_type") in BIGNUM_STORIES):
+                                or (brief.get("story_type") in BIGNUM_STORIES
+                                    and post.get("format") != "data_story")):
                 stat = big_number or extract_stat(content)
                 if stat:
                     out = _render_image("stat_highlight",
