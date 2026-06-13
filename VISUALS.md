@@ -240,15 +240,25 @@ Each step is independently shippable and fail-safe (a failure falls back to
 the card we render today). Steps 1–4 are the spiky v1 — the Modi–Trump case
 end to end. 5+ broaden it.
 
-**Step 1 — Entity + strategy extraction** *(Layer 1, 3 — the brain)*
-- Extend the existing article-understanding / decision Claude call to also emit
-  `entities` (people/orgs/products/locations, each typed + role) and
-  `visual_strategy` ∈ {typography, blueprint, data, image_portrait, image_vs, product, hybrid}.
-- Ride the call already made — no new Claude call. Cache on post meta
-  (extract-never-invent, misses cached, transient failures retry — same
-  posture as chart/blueprint).
-- **Files:** `pipeline/decision.py` (or the understanding call) + `pipeline/memory.py` (meta).
-- **Done when:** every scored post carries `entities[]` + `visual_strategy`.
+**Step 1 — Entity + strategy extraction** *(Layer 1, 3 — the brain)* ✅ SHIPPED
+- `pipeline/entities.py` — `VisualEntityExtractor.brief_for(post)` returns a
+  validated `{entities: [{name, type, role}], visual_strategy}` brief, where
+  `visual_strategy ∈ {typography, blueprint, data, image_portrait, image_vs, product, hybrid}`.
+- **Built as a bounded, cached extractor (mirrors `blueprint.py`), NOT by riding
+  the generator call** — a deliberate change from the original sketch. The
+  generator runs for every draft incl. rejected ones, has a tight token budget,
+  and redo/steer would re-extract each time; the lazy cached-on-meta pattern is
+  the codebase's established cost posture (charts/blueprint) and only spends when
+  a visual is actually made. The "typographic, no entities" verdict is cached as
+  a real answer (never re-calls); only a structurally-broken response stays
+  uncached to retry.
+- Deterministic `_infer_strategy()` fallback derives the strategy from subject
+  entities when the model returns an invalid one (2+ people → image_vs, 1 →
+  image_portrait, product → product). Free `looks_entity_rich()` pre-gate lets
+  Step 4 skip the call on abstract opinion posts.
+- **Files:** `pipeline/entities.py` (new), `tests/test_entities.py` (9 tests, all green).
+- **Done:** any post can be resolved to `entities[]` + `visual_strategy`, cached
+  on post meta under `visual_entities`. Rendering is unchanged (that's Step 4).
 
 **Step 2 — Licensed asset resolver, Tier 1** *(Layer 5 — the hands)*
 - New module `pipeline/assets.py`. `resolve_portrait(name)` → Wikipedia REST
