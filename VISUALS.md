@@ -204,45 +204,112 @@ dominant emotion → a deep multi-stop gradient + a suggested accent.
 > automation. The scroll-stopping version of the Modi–Trump example is a
 > treated **dual-portrait card**, not a photo of the call.
 
-### Phase V3a — visual entity + strategy extraction (the brain)
+### The 15-layer vision, mapped to what already exists
 
-| Item | Status |
-|---|---|
-| Extend the existing article-understanding / decision Claude call to also emit `entities` (people / orgs / products / locations, each typed + role) — no new call, ride the one already made | ⏳ next |
-| Emit `visual_strategy` ∈ {photo_portrait, photo_vs, data, diagram, product, typography} — the classifier that decides photo-driven vs the three branches we already render | ⏳ next |
-| Cache entities + strategy on the post meta (same posture as chart/blueprint: extract-never-invent, cached, misses cached, transient failures retry) | ⏳ next |
+The full V3 vision (the brainstorm doc) is 15 layers. **The honest accounting:
+most of it is already shipped** in V1–V2. Re-reading the vision against the
+codebase, here is where each layer actually stands — so the build targets the
+~6 layers that are genuinely new, not the 9 that already work.
 
-### Phase V3b — licensed asset resolution (the hands)
+| # | Layer (vision) | Status | Lives in / what's missing |
+|---|---|---|---|
+| 1 | Content Understanding (entities, type, emotion, triggers) | 🟡 | content-type = `format`, emotion = `dominant_emotion`, attention-trigger = the HOOK (all ✅, V1.95). **NEW: entity extraction** (people/orgs/products/locations) |
+| 2 | Attention Engine (the anchor) | ✅ | hook hierarchy already extracts the scroll-stopping line (`blueprint.py`, V1.95) |
+| 3 | Visual Strategy Engine (typography/blueprint/data/image/hybrid) | 🟡 | typography/blueprint/data branches all ✅. **NEW: image-first + hybrid branches** |
+| 4 | Visual Entity Engine (symbols/icons) | ✅ | `render/icons.mjs` + `pick_icon()` keyword→symbol (V1.75) |
+| 5 | Asset Retrieval (library→approved→wikimedia→official→licensed→search) | 🟡 | library + approved refs ✅ (`visual_refs`, V2a). **NEW: Wikipedia/Wikimedia/Openverse tiers.** Google "search provider" 🚫 refused |
+| 6 | Visual Blueprint Engine (framework/comparison/timeline/journey/process/list/chart/hero/narrative) | ✅ | all built (V1.9, V1.95) |
+| 7 | Composition Engine (layouts + sizes) | 🟡 | sizes square/story ✅ (V1.97); most layouts ✅. **NEW: dual_portrait, hero_portrait, product_showcase** |
+| 8 | Brand Engine (logo/fonts/colors/watermark/presets) | ✅ | full brand kit + per-preset defaults (V1, V1.5) |
+| 9 | Rendering Engine (Satori+resvg, 16:9/1:1/9:16) | ✅ | the spine (V1) |
+| 10 | Visual Critic (quality score → regenerate) | 🟡 | vision-critique loop exists for hero imagery (`design.py`, V2a). **NEW: generalize to a per-card score across attention/readability/hierarchy/brand/platform-fit** |
+| 11 | Visual A/B Engine (multiple approaches) | ✅ | `generate_alternates`, zero-marginal-cost (V1.97) |
+| 12 | Visual Genome (learn preferences) | 🟡 | `visual_prefs.py` learns template preference (V1.97). **NEW: add `visual_strategy` as a learned dimension** |
+| 13 | Platform Intelligence (per-platform strategy) | ❌ | **NEW: map platform → strategy/format/size bias** |
+| 14 | Visual Review Studio (debug console) | ⏳ | data pipeline already exists in post meta; **NEW: the Studio page itself** |
+| 15 | Self-Improving Loop (knowledge graph) | 🟡 | the Genome IS this loop; the "knowledge graph" framing is aspirational, grows from 12+13 |
 
-| Item | Status |
-|---|---|
-| **Tier 1 — Wikipedia REST lead-image** for named public figures: `…/page/summary/{name}` → `thumbnail.source`. We ALREADY call this API in `watch/trends.py`; the lead image is Wikipedia-editor-disambiguated, almost always the clean official portrait. One keyless call solves ~80% of "fetch the right face." | ⏳ |
-| **Tier 2 — Wikimedia Commons / Openverse CC search** for concepts, places, objects (filter to commercial-use licenses) | ⏳ |
-| **Tier 3 — existing `gpt-image-1`** (`design.py`) for abstract concepts with no real entity | ✅ (exists, reused) |
-| **No Tier 4.** No Google fallback. No-asset → existing typographic/procedural card. The wrong-image tail risk on a political account is asymmetric and uncompensated. | 🚫 by design |
-| Attribution line in the card footer when a CC asset requires it (small credit string) | ⏳ |
-| Per-entity portrait cache (resolve once, reuse — Modi's portrait doesn't change weekly) | ⏳ |
+**Conclusion:** the new work is layers **1 (entities), 3 (image strategy),
+5 (licensed assets), 7 (portrait/product layouts), 10 (general critic),
+13 (platform intelligence)**, plus the **14 (Studio)** view and the **12**
+strategy-dimension. Everything else ships today. That's the build below.
 
-### Phase V3c — treated layouts (the taste)
+### Step-by-step build sequence (the new work, ordered)
 
-| Item | Status |
-|---|---|
-| `dual_portrait` / `vs_portrait` template — two CC portraits, brand-color duotone or cut-out treatment, accent "×"/"vs" between, headline below. THE Modi–Trump case. | ⏳ |
-| `hero_portrait` template — single treated portrait + headline (composites onto the existing `hero_card` scrim path) | ⏳ |
-| Mandatory brand treatment (duotone / scrim / cut-out) on every fetched photo — raw photos are never placed flat; treatment is what makes the feed consistent AND reads as "news desk made it," not "scraped" | ⏳ |
-| `product_showcase` layout (company/product entities) | ⏸ — after the person-subject path proves out |
+Each step is independently shippable and fail-safe (a failure falls back to
+the card we render today). Steps 1–4 are the spiky v1 — the Modi–Trump case
+end to end. 5+ broaden it.
 
-### Phase V3d — learning (reuse the Genome)
+**Step 1 — Entity + strategy extraction** *(Layer 1, 3 — the brain)*
+- Extend the existing article-understanding / decision Claude call to also emit
+  `entities` (people/orgs/products/locations, each typed + role) and
+  `visual_strategy` ∈ {typography, blueprint, data, image_portrait, image_vs, product, hybrid}.
+- Ride the call already made — no new Claude call. Cache on post meta
+  (extract-never-invent, misses cached, transient failures retry — same
+  posture as chart/blueprint).
+- **Files:** `pipeline/decision.py` (or the understanding call) + `pipeline/memory.py` (meta).
+- **Done when:** every scored post carries `entities[]` + `visual_strategy`.
 
-| Item | Status |
-|---|---|
-| Log `visual_strategy` alongside `visual_template` (already logged); `visual_prefs.py` learns which strategies this account's audience rewards (e.g. "political → portraits +X%, finance → charts +Y%") | ⏳ — extends the existing log, no new loop |
+**Step 2 — Licensed asset resolver, Tier 1** *(Layer 5 — the hands)*
+- New module `pipeline/assets.py`. `resolve_portrait(name)` → Wikipedia REST
+  `…/page/summary/{name}` → `thumbnail.source` → fetch, size via Pillow → data-URL.
+  We ALREADY call this API in `watch/trends.py`; the lead image is
+  Wikipedia-editor-disambiguated — the clean official portrait ~80% of the time.
+- Per-entity cache (Modi's portrait doesn't change weekly).
+- **Done when:** `resolve_portrait("Narendra Modi")` returns a sized data-URL or None.
 
-**Sequencing note:** this is a 2–4 day build and should come AFTER the core
-loop is validated end-to-end (signals → draft → Telegram → approve → post)
-with live credits. Minimum spiky v1 = V3a (person/strategy extraction) +
-V3b Tier 1 (Wikipedia portraits) + V3c `dual_portrait`/`hero_portrait`.
-Skip Openverse, product shots, and the learning dimension until that lands.
+**Step 3 — Treated portrait templates** *(Layer 7 — the taste)*
+- `render/templates.mjs`: `dual_portrait` (two portraits, brand-color duotone
+  or circular cut-out, accent "×"/"vs" between, headline below) and
+  `hero_portrait` (single treated portrait + headline, reuses the `hero_card`
+  scrim path).
+- **Mandatory brand treatment** (duotone/scrim/cut-out) on every fetched photo —
+  raw photos are never placed flat. Treatment is what makes the feed consistent
+  AND reads as "news-desk graphic," not "scraped."
+- **Done when:** given 2 portrait data-URLs + a headline, the renderer produces a treated card.
+
+**Step 4 — Wire image-first into the auto-pick router** *(closes the v1 loop)*
+- In `visuals.py generate_for_post`: when `visual_strategy ∈ {image_portrait, image_vs}`,
+  resolve assets (Step 2) → render portrait template (Step 3). Any miss
+  (no entity, no portrait, render fail) → fall through to today's card.
+- **Done when:** a person-subject post auto-produces a treated portrait card end to end, the Modi–Trump example included.
+
+**Step 5 — Asset resolver Tier 2 + attribution** *(broaden Layer 5)*
+- Wikimedia Commons / Openverse CC search for concepts/places/products
+  (filter to commercial-use licenses). Feeds the existing `hero_card` background.
+- Small attribution footer line when a CC license requires it.
+- **No Tier "search/Google."** No-asset → existing card. (🚫 in Deferred.)
+
+**Step 6 — General Visual Critic** *(Layer 10)*
+- Generalize the `design.py` vision critique into a per-candidate score across
+  attention / readability / hierarchy / brand-fit / platform-fit (0–100).
+  Low score → regenerate or pick the next A/B alternate (the engine exists).
+- Fail-open (a dead judge passes the card), same as today.
+- **Done when:** cards carry a visual quality score; sub-threshold cards auto-swap to an alternate.
+
+**Step 7 — Platform Intelligence** *(Layer 13)*
+- Map platform → strategy/format/size bias in the strategy engine: LinkedIn →
+  blueprint/educational/portrait; X → punchy typography/high-contrast; IG →
+  carousel/emotional/square; Threads → conversational.
+- **Done when:** the same content yields a LinkedIn-framework, an X-punchy card, and an IG-carousel automatically.
+
+**Step 8 — Genome strategy dimension** *(Layer 12)*
+- Log `visual_strategy` alongside the already-logged `visual_template`;
+  `visual_prefs.py` learns which strategies this account's audience rewards
+  ("political → portraits +X%, finance → charts +Y%"). Extends the existing
+  log + loop — no new learning system.
+
+**Step 9 — Visual Review Studio** *(Layer 14)*
+- A Pulse Studio page showing the full trace per post: content → entities →
+  attention anchor → strategy → blueprint → assets chosen → A/B alternates →
+  final render → approval rate. The data already lives in post meta; this is
+  the read-only view (same shape as the other Studio pages).
+
+**Sequencing note:** this is a multi-day build and belongs AFTER the core loop
+is validated end-to-end (signals → draft → Telegram → approve → post) with
+live credits. Ship **Steps 1–4 first** (the Modi–Trump slice); they prove the
+whole thesis. 5–9 broaden and compound. Every step degrades to the card we
+render today, so the platform is never worse for having started.
 
 ---
 
