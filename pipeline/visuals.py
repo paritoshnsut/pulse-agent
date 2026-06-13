@@ -556,17 +556,16 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
     # 'big_number' is the explicit name for a BBC-style single-number card
     # (Rule 7); it renders through stat_highlight with a Claude-formatted number.
     BIGNUM_STORIES = ("money_news", "data_news", "achievement", "sports")
+    card_backdrop = None   # a faint duotone scene for text cards too (not only portraits)
     try:
-        from pipeline.entities import VisualEntityExtractor, looks_entity_rich
+        from pipeline.entities import VisualEntityExtractor
         content = post.get("content") or ""
-        # fire the brief when an image card is asked for, or (auto) when the post
-        # names a real subject OR leads with a number worth a big-number card.
-        has_number = bool(re.search(
-            r"[$₹]\s?\d|\d{2,}|\d\s?%|\bper ?cent|\bcrore|\blakh|\bbillion|"
-            r"\btrillion|\bmillion|\brecord\b|\branks?\b", content, re.I))
+        # compute the visual brief on every auto-render (cached on the post, so
+        # one call max): it yields the strategy + the contextual SYMBOLS used to
+        # give even an idea-post a faint scene backdrop. Explicit image templates
+        # always run it too.
         explicit_img = template in PORTRAIT_TEMPLATES or template == "big_number"
-        auto_ok = (template is None and not (PORTRAIT_TEMPLATES & shunned)
-                   and (looks_entity_rich(content) or has_number))
+        auto_ok = template is None and not (PORTRAIT_TEMPLATES & shunned)
         if explicit_img or auto_ok:
             from pipeline.assets import resolve_portrait, resolve_symbol
             brief = VisualEntityExtractor().brief_for(post, db_path=db_path) or {}
@@ -575,6 +574,12 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             # through to a chart/card below.
             if isinstance(post.get("meta_json"), dict):
                 post["meta_json"]["visual_entities"] = brief
+            # resolve a contextual scene once — reused by the portrait card AND
+            # the text cards below, so an idea-post (no face) still gets atmosphere.
+            for sym in brief.get("symbols", []):
+                card_backdrop = resolve_symbol(sym, width=440, mono=True)
+                if card_backdrop:
+                    break
             ents = brief.get("entities", [])
             subjects = [e for e in ents if e["role"] == "subject"
                         and e["type"] in ("person", "org")] \
@@ -602,19 +607,10 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             elif template != "big_number" and strat == "image_portrait" and subjects:
                 a = resolve_portrait(subjects[0]["name"])
                 if a:
-                    # background storytelling: the first licensed contextual
-                    # scene that resolves (Capitol, flag, …); None → plain panel.
-                    backdrop = None
-                    for sym in brief.get("symbols", []):
-                        # small + duotone = soft atmospheric silhouette, not a
-                        # recognizable pasted photo (art-direction note).
-                        backdrop = resolve_symbol(sym, width=440, mono=True)
-                        if backdrop:
-                            break
                     out = _render_image("hero_portrait", {
                         "text": head, "highlight": highlight, "subheadline": sub,
                         "tag": tag, "overline": kicker, "image": a,
-                        "backdrop": backdrop})
+                        "backdrop": card_backdrop})
             # BIG NUMBER card (Rule 7): one number IS the story. Explicit ask, or
             # auto for money/data/achievement/sports when a number dominates and
             # no portrait fit. The number is the hero; the headline is its label.
@@ -710,6 +706,10 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
     template = template or auto_template
     if size:
         data["_size"] = size
+    # give the text cards (quote/insight/stat) the same faint contextual scene —
+    # this is what makes idea-posts (no face) feel visual instead of flat.
+    if card_backdrop and isinstance(data, dict) and "backdrop" not in data:
+        data["backdrop"] = card_backdrop
     brand = brand_payload(account, kit, post)
     png = r.render(template, data, brand)
     used = template

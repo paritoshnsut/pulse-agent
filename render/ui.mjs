@@ -262,17 +262,30 @@ export function frame(t, children, data = {}) {
   const decor = decorLayer(t, { style: t.decor_style,
                                 icon: data.icon || null,
                                 seed: data.seed || 0 });
+  const bd = data.backdrop;
+  const kids = [];
+  // faint duotone contextual scene (atmosphere for text cards — a courthouse
+  // behind a legal take, a skyline behind an economy take). Kept very low so
+  // the large type stays the focus; the palette base + bold text carry contrast.
+  if (bd && bd.src) {
+    kids.push({ type: "img", props: { src: bd.src, width: SIZE.width, height: SIZE.height,
+      style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+        objectFit: "cover", opacity: 0.13 } } });
+  }
+  kids.push(...decor);
+  kids.push(el("div", {
+    position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+    display: "flex", flexDirection: "column", color: t.fg,
+    padding: "64px 72px", justifyContent: "space-between",
+  }, children));
+  if (bd && bd.credit) {
+    kids.push(el("div", { position: "absolute", bottom: 14, right: 18,
+      fontSize: 16, color: "rgba(245,247,250,0.45)", display: "flex" }, bd.credit));
+  }
   return el("div", {
     width: "100%", height: "100%", display: "flex", position: "relative",
     background: t.background, fontFamily: t.font,
-  }, [
-    ...decor,
-    el("div", {
-      position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-      display: "flex", flexDirection: "column", color: t.fg,
-      padding: "64px 72px", justifyContent: "space-between",
-    }, children),
-  ]);
+  }, kids);
 }
 
 // number chip: the shared "1 2 3" marker for structured cards
