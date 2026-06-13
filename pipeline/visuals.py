@@ -191,8 +191,10 @@ def brand_payload(account: dict, kit: Optional[dict],
         "font_family": font_family,
         "custom_font_key": custom_font_key(account.get("id"), font_family),
         "decor_style": settings.visuals_decor,
-        "watermark_text": (kit or {}).get("watermark_text")
-                          or (settings.ai_label or "").strip(),
+        # Only an explicit brand watermark shows on the card — no AI-assisted
+        # default. The ToS label still rides the posted TEXT (poster.py appends
+        # settings.ai_label there); the visual stays clean, news-desk style.
+        "watermark_text": (kit or {}).get("watermark_text") or "",
         "handle": account.get("handle") or "",
         "logo": logo_asset((kit or {}).get("logo_url")),
         # content-aware theming — format + dominant emotion drive the gradient
@@ -434,6 +436,18 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
 VALID_SIZES = ("square", "story")     # default (None) = 16:9 wide
 
 
+# story_type → the small uppercase kicker over a portrait headline (the
+# news-desk "BREAKING" overline). person_news leads with the face, no kicker.
+_STORY_KICKER = {
+    "breaking_news": "BREAKING", "money_news": "MONEY",
+    "data_news": "BY THE NUMBERS", "comparison": "HEAD TO HEAD",
+    "timeline": "TIMELINE", "explainer": "EXPLAINER", "quote": "QUOTE",
+    "prediction": "PREDICTION", "achievement": "MILESTONE",
+    "controversy": "CONTROVERSY", "policy": "POLICY",
+    "war_conflict": "CONFLICT", "sports": "SPORTS",
+}
+
+
 def _portrait_headline(post: dict) -> str:
     """A punchy headline for a portrait/vs card: the first tweet (threads) or
     the post body, hashtags stripped, trimmed to the lead sentence when long."""
@@ -552,19 +566,26 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             strat = ("image_vs" if template == "dual_portrait"
                      else "image_portrait" if template == "hero_portrait"
                      else brief.get("visual_strategy"))
-            head = _portrait_headline(post)
+            # crafted 6-12 word headline + short subheadline (the Visual Brief,
+            # Rules 5/6/18); fall back to the post's lead when the brief is old
+            # or empty.
+            head = brief.get("headline") or _portrait_headline(post)
+            sub = brief.get("subheadline") or ""
+            kicker = _STORY_KICKER.get(brief.get("story_type") or "", "")
             out = None
             if strat == "image_vs" and len(subjects) >= 2:
                 a = resolve_portrait(subjects[0]["name"])
                 b = resolve_portrait(subjects[1]["name"])
                 if a and b:
                     out = _render_image("dual_portrait", {
-                        "text": head, "images": [a, b],
+                        "text": head, "subheadline": sub, "images": [a, b],
                         "labels": [subjects[0]["name"], subjects[1]["name"]]})
             elif strat == "image_portrait" and subjects:
                 a = resolve_portrait(subjects[0]["name"])
                 if a:
-                    out = _render_image("hero_portrait", {"text": head, "image": a})
+                    out = _render_image("hero_portrait", {
+                        "text": head, "subheadline": sub, "overline": kicker,
+                        "image": a})
             if out:
                 return out
     except Exception as exc:  # noqa: BLE001

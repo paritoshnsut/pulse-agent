@@ -50,6 +50,12 @@ ENTITY_ROLES = ("subject", "mentioned")
 VISUAL_STRATEGIES = ("typography", "blueprint", "data",
                      "image_portrait", "image_vs", "product", "hybrid")
 
+# Story category (the GPT-rules spec): drives the card's kicker label + (later)
+# palette. Free-form is collapsed to the closest of these or "" if none fits.
+STORY_TYPES = ("breaking_news", "person_news", "money_news", "data_news",
+               "comparison", "timeline", "explainer", "quote", "prediction",
+               "achievement", "controversy", "policy", "war_conflict", "sports")
+
 EXTRACT_PROMPT = """Analyze this social post and decide its best VISUAL approach.
 
 1) ENTITIES — the named real-world things the post is centrally about. Only
@@ -68,14 +74,31 @@ EXTRACT_PROMPT = """Analyze this social post and decide its best VISUAL approach
    - typography: a pure opinion/quote/hot-take with no strong visual subject
    - hybrid: a person/product subject AND a key statistic both matter
 
+3) STORY_TYPE — one of: breaking_news, person_news, money_news, data_news,
+   comparison, timeline, explainer, quote, prediction, achievement,
+   controversy, policy, war_conflict, sports. "" if none fits.
+
+4) HEADLINE — the ONE thing a viewer must remember after 1.5 seconds, as a
+   punchy card headline. HARD LIMITS: 6-12 words, scannable, high-contrast,
+   no trailing period. NOT the full sentence from the post. Think a news-desk
+   chyron ("Elon Musk becomes world's first trillionaire").
+
+5) SUBHEADLINE — one short supporting line, max 10 words, that adds the crucial
+   context ("Now richer than most nations on earth"). "" if the headline is
+   self-sufficient.
+
 Return ONLY JSON:
 {{"entities": [{{"name": "...", "type": "person", "role": "subject"}}],
-  "visual_strategy": "image_vs"}}
+  "visual_strategy": "image_vs", "story_type": "breaking_news",
+  "headline": "...", "subheadline": "..."}}
 
-If the post has no named real-world subject and no data, return exactly:
-{{"entities": [], "visual_strategy": "typography"}}
+If the post has no named real-world subject and no data, still return a tight
+headline + subheadline for a typography card:
+{{"entities": [], "visual_strategy": "typography", "story_type": "",
+  "headline": "...", "subheadline": "..."}}
 
-Rules: extract names, never invent. Max 8 entities. Choose exactly one strategy.
+Rules: extract names, never invent. Max 8 entities. One strategy. Headline
+6-12 words. Never manufacture drama the post doesn't support.
 
 POST:
 {post}
@@ -129,7 +152,14 @@ def validate_visual_brief(raw: Any) -> Optional[dict]:
     strat = raw.get("visual_strategy")
     if strat not in VISUAL_STRATEGIES:
         strat = _infer_strategy(ents)
-    return {"entities": ents, "visual_strategy": strat}
+    story = raw.get("story_type")
+    if story not in STORY_TYPES:
+        story = ""
+    # Headline hard-trimmed to 12 words (Rule 6); a long model answer is
+    # truncated rather than rejected so a card still gets a tight line.
+    headline = " ".join(_clamp(raw.get("headline"), 140).split()[:12])
+    return {"entities": ents, "visual_strategy": strat, "story_type": story,
+            "headline": headline, "subheadline": _clamp(raw.get("subheadline"), 90)}
 
 
 # A multi-word proper noun ("Narendra Modi") or an all-caps acronym ("RBI").
@@ -200,8 +230,12 @@ class VisualEntityExtractor:
         Cached on first extraction (hit OR the typographic verdict); only a
         structurally-broken response stays uncached so it retries."""
         meta = post.get("meta_json") or {}
-        if "visual_entities" in meta:                 # cached hit (incl. typography)
-            return validate_visual_brief(meta["visual_entities"])
+        cached = meta.get("visual_entities")
+        # cached hit (incl. the typography verdict) — but a brief from before
+        # the headline/subheadline fields existed is treated as a miss so the
+        # post upgrades to the richer brief on its next render.
+        if isinstance(cached, dict) and "headline" in cached:
+            return validate_visual_brief(cached)
 
         article_text = _source_text(post, db_path)
         try:

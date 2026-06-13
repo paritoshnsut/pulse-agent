@@ -113,9 +113,11 @@ def test_typographic_verdict_is_cached(temp_db):
     payload = json.dumps({"entities": [], "visual_strategy": "typography"})
     brief = VisualEntityExtractor(client=StubClient(payload)).brief_for(
         memory.get_post(pid, db_path=temp_db), db_path=temp_db)
-    assert brief == {"entities": [], "visual_strategy": "typography"}
+    expected = {"entities": [], "visual_strategy": "typography",
+                "story_type": "", "headline": "", "subheadline": ""}
+    assert brief == expected
     stored = memory.get_post(pid, db_path=temp_db)["meta_json"]["visual_entities"]
-    assert stored == {"entities": [], "visual_strategy": "typography"}
+    assert stored == expected
 
 
 def test_transient_failure_not_cached(temp_db):

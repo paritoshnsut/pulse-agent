@@ -267,6 +267,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
   const t = theme(brand);
   const img = data.image || null;
   const headline = data.text || data.headline || "";
+  const sub = (data.subheadline || "").trim();
   const overline = (data.overline || "").trim();
   const imgW = img ? Math.round(dims.width * 0.44) : 0;
   const textW = dims.width - imgW;
@@ -296,6 +297,10 @@ export function heroPortrait(data, brand, dims = SIZE) {
         : el("div", { display: "flex", height: 8 }),
       el("div", { fontSize: fitFontSize(headline, 66, 34), fontWeight: 800,
         lineHeight: 1.12, marginTop: 20, display: "flex" }, headline),
+      sub
+        ? el("div", { fontSize: 30, color: t.muted, lineHeight: 1.3,
+            marginTop: 18, display: "flex" }, sub)
+        : el("div", { display: "flex" }),
     ]),
     footer(t),
   ]);
@@ -310,6 +315,7 @@ export function dualPortrait(data, brand, dims = SIZE) {
   const imgs = data.images || [];
   const labels = data.labels || [];
   const headline = data.text || data.headline || "";
+  const sub = (data.subheadline || "").trim();
   const stripH = Math.round(dims.height * 0.64);
   const halfW = Math.round(dims.width / 2);
 
@@ -344,8 +350,14 @@ export function dualPortrait(data, brand, dims = SIZE) {
     ]),
     el("div", { display: "flex", flexGrow: 1, flexDirection: "column",
       padding: "32px 56px", justifyContent: "space-between", color: t.fg }, [
-      el("div", { fontSize: fitFontSize(headline, 52, 30), fontWeight: 800,
-        lineHeight: 1.15, display: "flex" }, headline),
+      el("div", { display: "flex", flexDirection: "column" }, [
+        el("div", { fontSize: fitFontSize(headline, 52, 30), fontWeight: 800,
+          lineHeight: 1.15, display: "flex" }, headline),
+        sub
+          ? el("div", { fontSize: 28, color: t.muted, lineHeight: 1.3,
+              marginTop: 14, display: "flex" }, sub)
+          : el("div", { display: "flex" }),
+      ]),
       footer(t),
     ]),
   ]);
