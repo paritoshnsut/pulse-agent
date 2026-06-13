@@ -577,6 +577,8 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             # or empty.
             head = brief.get("headline") or _portrait_headline(post)
             sub = brief.get("subheadline") or ""
+            highlight = brief.get("highlight") or ""
+            tag = brief.get("tag") or ""
             kicker = _STORY_KICKER.get(brief.get("story_type") or "", "")
             out = None
             if strat == "image_vs" and len(subjects) >= 2:
@@ -584,14 +586,15 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
                 b = resolve_portrait(subjects[1]["name"])
                 if a and b:
                     out = _render_image("dual_portrait", {
-                        "text": head, "subheadline": sub, "images": [a, b],
+                        "text": head, "highlight": highlight, "subheadline": sub,
+                        "tag": tag, "images": [a, b],
                         "labels": [subjects[0]["name"], subjects[1]["name"]]})
             elif strat == "image_portrait" and subjects:
                 a = resolve_portrait(subjects[0]["name"])
                 if a:
                     out = _render_image("hero_portrait", {
-                        "text": head, "subheadline": sub, "overline": kicker,
-                        "image": a})
+                        "text": head, "highlight": highlight, "subheadline": sub,
+                        "tag": tag, "overline": kicker, "image": a})
             if out:
                 return out
     except Exception as exc:  # noqa: BLE001

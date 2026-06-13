@@ -263,11 +263,48 @@ export function carouselCta(data, brand) {
 // designed graphic, not a scrape. hero_portrait = one subject (text left, face
 // right); dual_portrait = two subjects with a "VS" badge.
 
+// An editorial pill (the "NEW ENVOY" / "US → INDIA" tag): accent fill, dark
+// text, uppercase. Falls back to a plain accent overline when used as a kicker.
+function pill(t, label) {
+  return el("div", {
+    display: "flex", alignSelf: "flex-start", background: t.accent,
+    color: "#0b0d12", fontSize: 24, fontWeight: 800, letterSpacing: 1,
+    textTransform: "uppercase", padding: "8px 16px", borderRadius: 8,
+  }, label);
+}
+
+// Headline with one phrase colour-popped (Rule 3). Rendered as wrapping word
+// spans so the highlight sits inline and the line still wraps cleanly — Satori
+// can't colour a substring inside a single text node.
+function highlightedHeadline(text, highlight, t, fontSize) {
+  const words = (text || "").split(/\s+/).filter(Boolean);
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9₹$%]/gi, "");
+  const hw = (highlight || "").split(/\s+/).filter(Boolean).map(norm);
+  const marked = new Set();
+  if (hw.length) {
+    for (let i = 0; i + hw.length <= words.length; i++) {
+      if (hw.every((w, j) => norm(words[i + j]) === w)) {
+        for (let j = 0; j < hw.length; j++) marked.add(i + j);
+        break;
+      }
+    }
+  }
+  return el("div", {
+    display: "flex", flexWrap: "wrap",
+    columnGap: Math.round(fontSize * 0.27), rowGap: Math.round(fontSize * 0.1),
+  }, words.map((w, i) => el("div", {
+    display: "flex", fontSize, fontWeight: 800, lineHeight: 1.1,
+    color: marked.has(i) ? t.accent : t.fg,
+  }, w)));
+}
+
 export function heroPortrait(data, brand, dims = SIZE) {
   const t = theme(brand);
   const img = data.image || null;
   const headline = data.text || data.headline || "";
+  const highlight = (data.highlight || "").trim();
   const sub = (data.subheadline || "").trim();
+  const tag = (data.tag || "").trim();
   const overline = (data.overline || "").trim();
   const imgW = img ? Math.round(dims.width * 0.44) : 0;
   const textW = dims.width - imgW;
@@ -290,13 +327,14 @@ export function heroPortrait(data, brand, dims = SIZE) {
     padding: "64px 56px", justifyContent: "space-between", color: t.fg,
   }, [
     el("div", { display: "flex", flexDirection: "column" }, [
-      accentBar(t),
-      overline
-        ? el("div", { fontSize: 28, fontWeight: 700, letterSpacing: 2, marginTop: 24,
-            textTransform: "uppercase", color: t.accent, display: "flex" }, overline)
-        : el("div", { display: "flex", height: 8 }),
-      el("div", { fontSize: fitFontSize(headline, 66, 34), fontWeight: 800,
-        lineHeight: 1.12, marginTop: 20, display: "flex" }, headline),
+      // tag pill (preferred) → plain accent overline → nothing
+      tag ? pill(t, tag)
+        : overline
+          ? el("div", { fontSize: 28, fontWeight: 700, letterSpacing: 2,
+              textTransform: "uppercase", color: t.accent, display: "flex" }, overline)
+          : el("div", { display: "flex", height: 8 }),
+      el("div", { display: "flex", marginTop: 22 },
+        [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 70, 36))]),
       sub
         ? el("div", { fontSize: 30, color: t.muted, lineHeight: 1.3,
             marginTop: 18, display: "flex" }, sub)
@@ -315,7 +353,9 @@ export function dualPortrait(data, brand, dims = SIZE) {
   const imgs = data.images || [];
   const labels = data.labels || [];
   const headline = data.text || data.headline || "";
+  const highlight = (data.highlight || "").trim();
   const sub = (data.subheadline || "").trim();
+  const tag = (data.tag || "").trim();
   const stripH = Math.round(dims.height * 0.64);
   const halfW = Math.round(dims.width / 2);
 
@@ -351,8 +391,9 @@ export function dualPortrait(data, brand, dims = SIZE) {
     el("div", { display: "flex", flexGrow: 1, flexDirection: "column",
       padding: "32px 56px", justifyContent: "space-between", color: t.fg }, [
       el("div", { display: "flex", flexDirection: "column" }, [
-        el("div", { fontSize: fitFontSize(headline, 52, 30), fontWeight: 800,
-          lineHeight: 1.15, display: "flex" }, headline),
+        tag ? pill(t, tag) : el("div", { display: "flex" }),
+        el("div", { display: "flex", marginTop: tag ? 14 : 0 },
+          [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 52, 30))]),
         sub
           ? el("div", { fontSize: 28, color: t.muted, lineHeight: 1.3,
               marginTop: 14, display: "flex" }, sub)

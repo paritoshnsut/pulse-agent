@@ -78,27 +78,37 @@ EXTRACT_PROMPT = """Analyze this social post and decide its best VISUAL approach
    comparison, timeline, explainer, quote, prediction, achievement,
    controversy, policy, war_conflict, sports. "" if none fits.
 
-4) HEADLINE — the ONE thing a viewer must remember after 1.5 seconds, as a
-   punchy card headline. HARD LIMITS: 6-12 words, scannable, high-contrast,
-   no trailing period. NOT the full sentence from the post. Think a news-desk
-   chyron ("Elon Musk becomes world's first trillionaire").
+4) HEADLINE — the scroll-stopping line, understandable in ONE second.
+   TABLOID-punchy, not magazine-clever. HARD LIMITS: 3-8 words, concrete,
+   forceful, front-load the surprising fact, no trailing period.
+   GOOD: "Trump's loyalist headed to India" · "Musk becomes world's first
+   trillionaire" · "Odisha makes all education free".
+   BAD (too magazine/literary — never write like this): "How X is rewriting
+   the playbook" · "The quiet revolution in Y" · "What Z tells us about ...".
 
-5) SUBHEADLINE — one short supporting line, max 10 words, that adds the crucial
-   context ("Now richer than most nations on earth"). "" if the headline is
-   self-sufficient.
+5) HIGHLIGHT — the 1-3 word phrase INSIDE the headline that matters most, to be
+   colour-popped (e.g. "TRILLIONAIRE", "FREE", "INDIA"). MUST be an exact
+   substring of the headline. "" if nothing deserves emphasis.
+
+6) SUBHEADLINE — one short supporting line, max 8 words ("Now richer than most
+   nations"). "" if the headline stands alone.
+
+7) TAG — a tiny editorial pill that orients the viewer, 1-3 words, often a
+   relation or label: "NEW ENVOY", "US → INDIA", "TRUMP ALLY", "₹1 LAKH CR",
+   "KG TO PG". "" if none fits. (More specific than the story category.)
 
 Return ONLY JSON:
 {{"entities": [{{"name": "...", "type": "person", "role": "subject"}}],
   "visual_strategy": "image_vs", "story_type": "breaking_news",
-  "headline": "...", "subheadline": "..."}}
+  "headline": "...", "highlight": "...", "subheadline": "...", "tag": "..."}}
 
 If the post has no named real-world subject and no data, still return a tight
 headline + subheadline for a typography card:
 {{"entities": [], "visual_strategy": "typography", "story_type": "",
-  "headline": "...", "subheadline": "..."}}
+  "headline": "...", "highlight": "", "subheadline": "...", "tag": ""}}
 
-Rules: extract names, never invent. Max 8 entities. One strategy. Headline
-6-12 words. Never manufacture drama the post doesn't support.
+Rules: extract names, never invent. Max 8 entities. One strategy. Headline 3-8
+plain words. Never manufacture drama the post doesn't support.
 
 POST:
 {post}
@@ -155,11 +165,18 @@ def validate_visual_brief(raw: Any) -> Optional[dict]:
     story = raw.get("story_type")
     if story not in STORY_TYPES:
         story = ""
-    # Headline hard-trimmed to 12 words (Rule 6); a long model answer is
+    # Headline hard-trimmed to 9 words (tabloid-punchy); a long model answer is
     # truncated rather than rejected so a card still gets a tight line.
-    headline = " ".join(_clamp(raw.get("headline"), 140).split()[:12])
+    headline = " ".join(_clamp(raw.get("headline"), 120).split()[:9])
+    # highlight only survives if it's an exact substring of the headline (so the
+    # template can colour-pop it safely); else dropped.
+    highlight = _clamp(raw.get("highlight"), 40)
+    if highlight and highlight.lower() not in headline.lower():
+        highlight = ""
     return {"entities": ents, "visual_strategy": strat, "story_type": story,
-            "headline": headline, "subheadline": _clamp(raw.get("subheadline"), 90)}
+            "headline": headline, "highlight": highlight,
+            "subheadline": _clamp(raw.get("subheadline"), 80),
+            "tag": _clamp(raw.get("tag"), 24)}
 
 
 # A multi-word proper noun ("Narendra Modi") or an all-caps acronym ("RBI").
@@ -232,9 +249,9 @@ class VisualEntityExtractor:
         meta = post.get("meta_json") or {}
         cached = meta.get("visual_entities")
         # cached hit (incl. the typography verdict) — but a brief from before
-        # the headline/subheadline fields existed is treated as a miss so the
-        # post upgrades to the richer brief on its next render.
-        if isinstance(cached, dict) and "headline" in cached:
+        # the latest fields (headline/highlight/tag) existed is treated as a
+        # miss so the post upgrades to the richer brief on its next render.
+        if isinstance(cached, dict) and "tag" in cached:
             return validate_visual_brief(cached)
 
         article_text = _source_text(post, db_path)

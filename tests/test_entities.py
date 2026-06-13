@@ -114,7 +114,8 @@ def test_typographic_verdict_is_cached(temp_db):
     brief = VisualEntityExtractor(client=StubClient(payload)).brief_for(
         memory.get_post(pid, db_path=temp_db), db_path=temp_db)
     expected = {"entities": [], "visual_strategy": "typography",
-                "story_type": "", "headline": "", "subheadline": ""}
+                "story_type": "", "headline": "", "highlight": "",
+                "subheadline": "", "tag": ""}
     assert brief == expected
     stored = memory.get_post(pid, db_path=temp_db)["meta_json"]["visual_entities"]
     assert stored == expected
