@@ -434,6 +434,20 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
 VALID_SIZES = ("square", "story")     # default (None) = 16:9 wide
 
 
+def _portrait_headline(post: dict) -> str:
+    """A punchy headline for a portrait/vs card: the first tweet (threads) or
+    the post body, hashtags stripped, trimmed to the lead sentence when long."""
+    meta = post.get("meta_json") or {}
+    tweets = meta.get("tweets") or []
+    text = (tweets[0] if tweets else (post.get("content") or "")).strip()
+    text = re.sub(r"(?:\s*#\w+)+\s*$", "", text)
+    if len(text) > 150:
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        text = (parts[0] if parts and len(parts[0]) >= 40
+                else text[:150].rsplit(" ", 1)[0] + "…")
+    return text
+
+
 def generate_for_post(post_id: int, db_path: Optional[str] = None,
                       renderer=None, template: Optional[str] = None,
                       size: Optional[str] = None) -> Optional[str]:
@@ -496,6 +510,67 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
             if template is None else set()
     except Exception:  # noqa: BLE001
         shunned = set()
+
+    # image-led cards (V3 Steps 2-4): a person-subject post becomes a treated
+    # portrait card. Explicit hero_portrait/dual_portrait always tries; on the
+    # auto path only entity-rich posts (free pre-gate) consult the cached entity
+    # brief, and only image_* strategies render here. Any miss (no entity, no
+    # licensed portrait, render fail) → fall through to today's card.
+    PORTRAIT_TEMPLATES = {"hero_portrait", "dual_portrait"}
+
+    def _render_image(tmpl: str, idata: dict) -> Optional[str]:
+        """Render an image-led template (portraits) and persist. No Pillow
+        fallback — a portrait can't be pixel-pushed; a miss returns None and the
+        caller falls through to the normal card."""
+        brand = brand_payload(account, kit, post)
+        idata = {**idata, "seed": post.get("id") or 0}
+        if size:
+            idata["_size"] = size
+        png = r.render(tmpl, idata, brand)
+        if png is None:
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        path = _save(png, f"post{post_id}-{stamp}{suffix}.png")
+        meta = {(f"visual_{size}" if size else "visual"): path.name}
+        if not size:
+            meta["visual_template"] = tmpl
+        memory.update_post_meta(post_id, meta, db_path=db_path)
+        logger.info("Portrait visual for #%d: %s via %s", post_id, path.name, tmpl)
+        return str(path)
+
+    try:
+        from pipeline.entities import VisualEntityExtractor, looks_entity_rich
+        auto_ok = (template is None and not (PORTRAIT_TEMPLATES & shunned)
+                   and looks_entity_rich(post.get("content") or ""))
+        if template in PORTRAIT_TEMPLATES or auto_ok:
+            from pipeline.assets import resolve_portrait
+            brief = VisualEntityExtractor().brief_for(post, db_path=db_path) or {}
+            ents = brief.get("entities", [])
+            subjects = [e for e in ents if e["role"] == "subject"
+                        and e["type"] in ("person", "org")] \
+                or [e for e in ents if e["type"] in ("person", "org")]
+            strat = ("image_vs" if template == "dual_portrait"
+                     else "image_portrait" if template == "hero_portrait"
+                     else brief.get("visual_strategy"))
+            head = _portrait_headline(post)
+            out = None
+            if strat == "image_vs" and len(subjects) >= 2:
+                a = resolve_portrait(subjects[0]["name"])
+                b = resolve_portrait(subjects[1]["name"])
+                if a and b:
+                    out = _render_image("dual_portrait", {
+                        "text": head, "images": [a, b],
+                        "labels": [subjects[0]["name"], subjects[1]["name"]]})
+            elif strat == "image_portrait" and subjects:
+                a = resolve_portrait(subjects[0]["name"])
+                if a:
+                    out = _render_image("hero_portrait", {"text": head, "image": a})
+            if out:
+                return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Portrait path failed for #%d: %s", post_id, exc)
+    if template in PORTRAIT_TEMPLATES:
+        template = None  # explicit ask, couldn't resolve → auto-pick a card
 
     # data visualization: an explicit chart_card request, or a data_story on
     # auto-pick, tries the chart spec (cached on the post; one Claude call

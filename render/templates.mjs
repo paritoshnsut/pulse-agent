@@ -257,9 +257,105 @@ export function carouselCta(data, brand) {
   ], data);
 }
 
+// --------------------------------------------------- portrait cards (V3 Step 3)
+// News-desk look: a licensed portrait (resolved upstream from Wikipedia) gets a
+// mandatory brand treatment — never a raw flat photo — so the feed reads as a
+// designed graphic, not a scrape. hero_portrait = one subject (text left, face
+// right); dual_portrait = two subjects with a "VS" badge.
+
+export function heroPortrait(data, brand, dims = SIZE) {
+  const t = theme(brand);
+  const img = data.image || null;
+  const headline = data.text || data.headline || "";
+  const overline = (data.overline || "").trim();
+  const imgW = img ? Math.round(dims.width * 0.44) : 0;
+  const textW = dims.width - imgW;
+
+  // image column: a flow <img> filling a fixed box (dual_portrait's proven
+  // pattern), then absolute brand-wash + bottom fade so it reads as a graphic.
+  const imgCol = img
+    ? el("div", { display: "flex", width: imgW, height: dims.height, position: "relative" }, [
+        { type: "img", props: { src: img.src, width: imgW, height: dims.height,
+          style: { width: imgW, height: dims.height, objectFit: "cover" } } },
+        el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
+          background: `linear-gradient(90deg, ${t.background} 0%, rgba(0,0,0,0) 28%)` }),
+        el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
+          background: `linear-gradient(180deg, rgba(8,10,14,0) 62%, rgba(8,10,14,0.5) 100%)` }),
+      ])
+    : null;
+
+  const textCol = el("div", {
+    display: "flex", flexDirection: "column", width: textW, height: dims.height,
+    padding: "64px 56px", justifyContent: "space-between", color: t.fg,
+  }, [
+    el("div", { display: "flex", flexDirection: "column" }, [
+      accentBar(t),
+      overline
+        ? el("div", { fontSize: 28, fontWeight: 700, letterSpacing: 2, marginTop: 24,
+            textTransform: "uppercase", color: t.accent, display: "flex" }, overline)
+        : el("div", { display: "flex", height: 8 }),
+      el("div", { fontSize: fitFontSize(headline, 66, 34), fontWeight: 800,
+        lineHeight: 1.12, marginTop: 20, display: "flex" }, headline),
+    ]),
+    footer(t),
+  ]);
+
+  return el("div", { width: dims.width, height: dims.height, display: "flex",
+    background: t.background, fontFamily: t.font },
+    imgCol ? [textCol, imgCol] : [textCol]);
+}
+
+export function dualPortrait(data, brand, dims = SIZE) {
+  const t = theme(brand);
+  const imgs = data.images || [];
+  const labels = data.labels || [];
+  const headline = data.text || data.headline || "";
+  const stripH = Math.round(dims.height * 0.64);
+  const halfW = Math.round(dims.width / 2);
+
+  const half = (asset, label) => el("div", {
+    display: "flex", width: halfW, height: stripH, position: "relative",
+  }, [
+    asset
+      ? { type: "img", props: { src: asset.src, width: halfW, height: stripH,
+          style: { width: halfW, height: stripH, objectFit: "cover" } } }
+      : el("div", { width: "100%", height: "100%", display: "flex", background: t.panel }),
+    el("div", { position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+      background: "linear-gradient(180deg, rgba(8,10,14,0.05) 50%, rgba(8,10,14,0.88) 100%)" }),
+    label
+      ? el("div", { position: "absolute", bottom: 22, left: 0, width: "100%",
+          display: "flex", justifyContent: "center", fontSize: 32, fontWeight: 700,
+          color: "#f5f7fa" }, label)
+      : el("div", { display: "flex" }),
+  ]);
+
+  const vs = el("div", {
+    position: "absolute", left: halfW - 46, top: Math.round(stripH / 2) - 46,
+    width: 92, height: 92, borderRadius: 46, background: t.accent,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 34, fontWeight: 800, color: "#0b0d12",
+    border: "5px solid " + t.background,
+  }, "VS");
+
+  return el("div", { width: "100%", height: "100%", display: "flex", flexDirection: "column",
+    background: t.background, fontFamily: t.font }, [
+    el("div", { display: "flex", position: "relative" }, [
+      half(imgs[0], labels[0]), half(imgs[1], labels[1]), vs,
+    ]),
+    el("div", { display: "flex", flexGrow: 1, flexDirection: "column",
+      padding: "32px 56px", justifyContent: "space-between", color: t.fg }, [
+      el("div", { fontSize: fitFontSize(headline, 52, 30), fontWeight: 800,
+        lineHeight: 1.15, display: "flex" }, headline),
+      footer(t),
+    ]),
+  ]);
+}
+
 export const TEMPLATES = {
   quote_card: quoteCard,
   hero_card: heroCard,
+  hero_portrait: heroPortrait,
+  dual_portrait: dualPortrait,
   stat_highlight: statHighlight,
   insight_card: insightCard,
   chart_card: chartCard,
