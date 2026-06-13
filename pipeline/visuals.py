@@ -172,8 +172,18 @@ def custom_font_key(account_id: Optional[int],
     return None
 
 
-def brand_payload(account: dict, kit: Optional[dict]) -> dict:
+def brand_payload(account: dict, kit: Optional[dict],
+                  post: Optional[dict] = None) -> dict:
     font_family = (kit or {}).get("font_family")
+    # Emotion lives in meta_json; extract it so the visual layer can pick the
+    # right gradient without a separate DB call.
+    meta = (post or {}).get("meta_json") or {}
+    if isinstance(meta, str):
+        try:
+            import json as _json
+            meta = _json.loads(meta)
+        except Exception:
+            meta = {}
     return {
         "accent_color": (kit or {}).get("accent_color"),
         "secondary_color": (kit or {}).get("secondary_color"),
@@ -185,6 +195,9 @@ def brand_payload(account: dict, kit: Optional[dict]) -> dict:
                           or (settings.ai_label or "").strip(),
         "handle": account.get("handle") or "",
         "logo": logo_asset((kit or {}).get("logo_url")),
+        # content-aware theming — format + dominant emotion drive the gradient
+        "content_format": (post or {}).get("format") or "",
+        "content_emotion": meta.get("dominant_emotion") or meta.get("emotion") or "",
     }
 
 
@@ -392,7 +405,7 @@ def generate_carousel(post: dict, account: dict, kit: Optional[dict],
         pack, mode = split_into_slides(post, kit), "carousel_split"
     if not pack:
         return None
-    brand = brand_payload(account, kit)
+    brand = brand_payload(account, kit, post)
     total = len(pack["slides"]) + 2  # cover + content + cta
     jobs = [("carousel_cover", {"text": pack["cover"], "total": total})]
     for i, s in enumerate(pack["slides"]):
@@ -455,7 +468,7 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
 
     def _render_structured(tmpl: str, spec: dict) -> Optional[str]:
         """Render an extracted structure (chart/blueprint) and save it."""
-        brand = brand_payload(account, kit)
+        brand = brand_payload(account, kit, post)
         data = {**spec, "seed": post.get("id") or 0}
         if size:
             data["_size"] = size
@@ -559,7 +572,7 @@ def generate_for_post(post_id: int, db_path: Optional[str] = None,
     template = template or auto_template
     if size:
         data["_size"] = size
-    brand = brand_payload(account, kit)
+    brand = brand_payload(account, kit, post)
     png = r.render(template, data, brand)
     used = template
     if png is None:
@@ -636,7 +649,7 @@ def generate_alternates(post_id: int, k: int = 2,
         pass
 
     r = renderer or SatoriRenderer()
-    brand = brand_payload(account, kit)
+    brand = brand_payload(account, kit, post)
     text = _strip_hashtags((meta.get("tweets") or [post["content"]])[0])
     seed = post.get("id") or 0
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
