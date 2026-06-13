@@ -317,6 +317,30 @@ function highlightedHeadline(text, highlight, t, fontSize) {
   }, w)));
 }
 
+// Headline hierarchy (the art-director priority): when the dominant phrase
+// (the highlight) LEADS the headline, render it big + accent and demote the
+// rest to a smaller white line below — so the eye lands in one place. Falls
+// back to inline colour-pop when the phrase isn't a clean leading phrase.
+function headlineStack(text, highlight, t, bigMax = 96, smallMax = 56) {
+  const hl = (highlight || "").trim();
+  if (hl && text.toLowerCase().startsWith(hl.toLowerCase())
+      && text.length > hl.length + 2) {
+    const rest = text.slice(hl.length).replace(/^[\s—,:-]+/, "").trim();
+    const shadow = "0 1px 6px rgba(0,0,0,0.35)";
+    return el("div", { display: "flex", flexDirection: "column" }, [
+      el("div", { display: "flex", fontFamily: DISPLAY,
+        fontSize: fitFontSize(hl, bigMax, 54), fontWeight: 700, lineHeight: 1.0,
+        color: t.accent, textShadow: shadow }, hl),
+      rest
+        ? el("div", { display: "flex", fontFamily: DISPLAY, marginTop: 10,
+            fontSize: fitFontSize(rest, smallMax, 34), fontWeight: 700,
+            lineHeight: 1.08, color: t.fg, textShadow: shadow }, rest)
+        : el("div", { display: "flex" }),
+    ]);
+  }
+  return highlightedHeadline(text, highlight, t, fitFontSize(text, smallMax + 12, 36));
+}
+
 // hex → rgba (Satori is happiest with rgba() for translucent fills).
 function rgba(hex, a) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
@@ -352,9 +376,11 @@ export function heroPortrait(data, brand, dims = SIZE) {
     ? el("div", { display: "flex", width: imgW, height: dims.height, position: "relative" }, [
         { type: "img", props: { src: img.src, width: imgW, height: dims.height,
           style: { width: imgW, height: dims.height, objectFit: "cover" } } },
-        // blend the portrait's left edge into the panel (tinted, not black)
+        // feather the portrait's left edge into the panel so it emerges from
+        // the atmosphere instead of butting against a hard vertical seam
         el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
-          background: `linear-gradient(90deg, ${rgba(t.scrim, 0.95)} 0%, rgba(0,0,0,0) 30%)` }),
+          background: `linear-gradient(90deg, ${rgba(t.scrim, 0.98)} 0%, `
+            + `${rgba(t.scrim, 0.45)} 24%, rgba(0,0,0,0) 52%)` }),
         // light bottom grounding only
         el("div", { position: "absolute", top: 0, left: 0, width: imgW, height: dims.height,
           background: `linear-gradient(180deg, rgba(0,0,0,0) 68%, ${rgba(t.scrim, 0.45)} 100%)` }),
@@ -374,7 +400,7 @@ export function heroPortrait(data, brand, dims = SIZE) {
               textTransform: "uppercase", color: t.accent, display: "flex" }, overline)
           : el("div", { display: "flex", height: 8 }),
       el("div", { display: "flex", marginTop: 22 },
-        [highlightedHeadline(headline, highlight, t, fitFontSize(headline, 70, 36))]),
+        [headlineStack(headline, highlight, t)]),
       sub
         ? el("div", { fontFamily: SANS, fontSize: 29, fontWeight: 500,
             color: "rgba(244,246,250,0.86)", lineHeight: 1.3, marginTop: 18,
