@@ -728,6 +728,55 @@ def ideas(account_id: int, user: dict = Depends(require_auth)):
     return briefing._cool_ideas(account_id, db_path=_db())
 
 
+@app.post("/api/signals/{signal_id}/draft")
+def draft_signal(signal_id: int, user: dict = Depends(require_auth)):
+    """Draft a specific signal on demand — the 'Draft this' button in the Ideas
+    bank. The scheduler only auto-drafts FIRE/WARM; this lets you turn a COOL
+    idea into a draft with one click. Mirrors the scheduler's per-signal path:
+    voice gate, 6-layer context, grounding + stance-arc guards."""
+    sig = memory.get_signal(signal_id, db_path=_db())
+    if not sig:
+        raise HTTPException(status_code=404, detail="No such signal")
+    account = _own_account(sig["account_id"], user)
+    # already drafted? return the existing draft instead of duplicating.
+    existing = [p for p in memory.get_posts(account_id=account["id"], db_path=_db())
+                if p.get("signal_id") == signal_id]
+    if existing:
+        return memory.get_post(existing[0]["id"], db_path=_db())
+    if not memory.get_style_dna(account["id"], db_path=_db()):
+        raise HTTPException(status_code=400, detail="Train a voice for this account first.")
+    # get_signal returns the signals row only; join the article fields the
+    # generator needs (title/url/source/description/vertical/region).
+    art = memory.get_article(sig["article_id"], db_path=_db()) or {}
+    for k in ("title", "url", "source_name", "source", "description", "vertical", "region"):
+        sig.setdefault(k, art.get(k))
+
+    from pipeline.context import ContextRetriever
+    from pipeline.generator import ContentGenerator
+    from style.scorer import PersonaConsistencyScorer
+    from style.voice import effective_for
+    genome = effective_for(account["id"], db_path=_db())
+    ctx = ContextRetriever().context_for(sig, account)
+    grounding = arc_guard = None
+    try:
+        from pipeline.grounding import GroundingChecker
+        from pipeline.integrity import StanceArcGuard
+        if settings.grounding_enabled:
+            grounding = GroundingChecker()
+        if settings.arc_guard_enabled:
+            arc_guard = StanceArcGuard()
+    except Exception:  # noqa: BLE001 — guards are a bonus, never a blocker
+        pass
+    draft = ContentGenerator().generate_checked(
+        sig, genome, fmt=sig.get("format") or "hot_take",
+        scorer=PersonaConsistencyScorer(), account_id=account["id"],
+        persist=True, context=ctx, grounding=grounding, arc_guard=arc_guard)
+    if not draft or draft.get("empty"):
+        raise HTTPException(status_code=400,
+                            detail=(draft or {}).get("note") or "Draft generation failed")
+    return memory.get_post(draft["post_id"], db_path=_db())
+
+
 @app.get("/api/briefing/{account_id}")
 def get_briefing(account_id: int, user: dict = Depends(require_auth)):
     account = _own_account(account_id, user)

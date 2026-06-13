@@ -11,7 +11,17 @@ export default function Ideas({ accounts }) {
   const [topic, setTopic] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [draftingId, setDraftingId] = useState(null);
+  const [ideaMsg, setIdeaMsg] = useState('');
   const id = acct ?? accounts[0]?.id;
+
+  const draftIdea = async (sigId) => {
+    setDraftingId(sigId); setIdeaMsg('');
+    try {
+      const p = await api(`/api/signals/${sigId}/draft`, { method: 'POST' });
+      setIdeaMsg(`✍️ drafted #${p.id} — it's in the Review tab`);
+    } catch (e) { setIdeaMsg(e.message); } finally { setDraftingId(null); }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -53,11 +63,19 @@ export default function Ideas({ accounts }) {
         <div className="font-medium mb-2">💡 Ideas bank (yesterday's mid-tier signals)</div>
         {ideas.length === 0 && <div className="text-sm text-zinc-400">Empty — quiet day.</div>}
         {ideas.map((s) => (
-          <div key={s.id} className="py-2 border-b border-zinc-800 last:border-0">
-            <div className="text-sm">[{s.score.toFixed(1)}] {s.title}</div>
-            {s.angle && <div className="text-xs text-zinc-500">angle: {s.angle}</div>}
+          <div key={s.id}
+               className="py-2 border-b border-zinc-800 last:border-0 flex items-start gap-3">
+            <div className="flex-1">
+              <div className="text-sm">[{s.score.toFixed(1)}] {s.title}</div>
+              {s.angle && <div className="text-xs text-zinc-500">angle: {s.angle}</div>}
+            </div>
+            <Btn color="green" disabled={draftingId === s.id}
+                 onClick={() => draftIdea(s.id)}>
+              {draftingId === s.id ? 'drafting…' : '✍️ Draft this'}
+            </Btn>
           </div>
         ))}
+        {ideaMsg && <div className="mt-2 text-sm text-emerald-400">{ideaMsg}</div>}
       </Card>
       <Card>
         <div className="font-medium mb-2">☀️ Briefing</div>
